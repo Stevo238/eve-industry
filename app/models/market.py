@@ -25,13 +25,22 @@ class MarketOrder(Base):
 
 
 class MarketPrice(Base):
-    """Adjusted and average prices from /markets/prices/ — used in industry cost formulas."""
+    """
+    Prices per type_id.
+
+    adjusted_price / average_price: from /markets/prices/ (CCP global averages, used in
+      industry job cost formula).
+    buy_price:  best buy-order price in Jita (what you can sell for immediately).
+    sell_price: best sell-order price in Jita (what you'd pay to buy immediately).
+    """
 
     __tablename__ = "market_prices"
 
     type_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     adjusted_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     average_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    buy_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sell_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     last_updated: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

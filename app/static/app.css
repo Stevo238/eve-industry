@@ -307,3 +307,22 @@ label { color: var(--text-muted); font-size: 12px; }
 .flex { display: flex; align-items: center; }
 .flex-between { display: flex; align-items: center; justify-content: space-between; }
 hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+
+/* ── Settings / Forms ──────────────────────────────── */
+.form-row { display: flex; flex-direction: column; gap: 4px; }
+.form-label { font-size: 13px; font-weight: 500; color: var(--text); }
+.form-hint { display: block; font-size: 11px; color: var(--text-muted); font-weight: 400; }
+.form-input {
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 13px;
+  width: 200px;
+}
+.form-input:focus { outline: none; border-color: var(--accent); }
+
+/* ── Manufacturing table row colouring ─────────────── */
+tr.row-profitable > td { background: rgba(0, 200, 150, 0.06); }
+tr.row-unprofitable > td { background: rgba(224, 82, 96, 0.05); }

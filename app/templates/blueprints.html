@@ -6,6 +6,7 @@
     <div class="page-title">Blueprints</div>
     <div class="page-sub">{{ total }} blueprint(s) across all characters</div>
   </div>
+  <a href="/industry/manufacturing" class="btn btn-primary">⚙ Manufacturing Analysis</a>
 </div>
 
 <form method="get" action="/blueprints">
@@ -43,7 +44,6 @@
           <th style="text-align:center">TE</th>
           <th style="text-align:center">Runs</th>
           <th>Location Flag</th>
-          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -72,13 +72,9 @@
             {% endif %}
           </td>
           <td class="text-muted">{{ bp.location_flag }}</td>
-          <td>
-            <a href="/industry/manufacturing?character_id={{ bp.character_id }}"
-               class="btn btn-sm btn-ghost">Analyse</a>
-          </td>
         </tr>
         {% else %}
-        <tr><td colspan="8" style="text-align:center; padding:30px; color:var(--text-muted)">
+        <tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text-muted)">
           No blueprints found. Sync your characters first.
         </td></tr>
         {% endfor %}

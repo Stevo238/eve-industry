@@ -22,7 +22,17 @@ async def get_db():
 
 async def init_db():
     # Import all models so they register with Base.metadata
-    from app.models import assets, blueprints, character, industry, location, market, sde  # noqa: F401
+    from app.models import assets, blueprints, character, industry, location, market, sde, settings  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+        # Add columns introduced after initial schema — safe to run every startup
+        for sql in [
+            "ALTER TABLE market_prices ADD COLUMN buy_price REAL",
+            "ALTER TABLE market_prices ADD COLUMN sell_price REAL",
+        ]:
+            try:
+                await conn.execute(__import__("sqlalchemy").text(sql))
+            except Exception:
+                pass  # column already exists

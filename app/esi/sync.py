@@ -299,6 +299,102 @@ async def sync_market_prices(db: AsyncSession) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Market order prices — best Jita buy/sell per type
+# ---------------------------------------------------------------------------
+
+
+async def sync_blueprint_market_prices(db: AsyncSession) -> int:
+    """
+    Fetch best Jita buy and sell prices for every type_id referenced in
+    blueprint materials and products.  Updates buy_price / sell_price on
+    existing MarketPrice rows (or inserts stub rows if none exist).
+
+    Uses The Forge region (10000002).  Fetches per-type concurrently in
+    batches of 20 to stay polite to ESI.
+    """
+    import asyncio
+    import httpx
+
+    from app.models.market import MarketPrice
+    from app.models.sde import SdeBlueprintMaterial, SdeBlueprintProduct
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+    REGION_ID = 10000002  # The Forge (Jita)
+
+    mat_ids = {
+        r[0]
+        for r in (
+            await db.execute(select(SdeBlueprintMaterial.material_type_id).distinct())
+        ).fetchall()
+    }
+    prod_ids = {
+        r[0]
+        for r in (
+            await db.execute(select(SdeBlueprintProduct.product_type_id).distinct())
+        ).fetchall()
+    }
+    type_ids = list(mat_ids | prod_ids)
+
+    if not type_ids:
+        return 0
+
+    best_prices: dict[int, dict] = {}
+
+    async def fetch_type(client: httpx.AsyncClient, type_id: int) -> None:
+        for order_type, key in [("sell", "sell_price"), ("buy", "buy_price")]:
+            try:
+                resp = await client.get(
+                    f"https://esi.evetech.net/latest/markets/{REGION_ID}/orders/",
+                    params={"type_id": type_id, "order_type": order_type},
+                    headers={"Accept": "application/json"},
+                    timeout=15.0,
+                )
+                if resp.status_code == 200:
+                    orders = resp.json()
+                    if orders:
+                        if order_type == "sell":
+                            price = min(o["price"] for o in orders)
+                        else:
+                            price = max(o["price"] for o in orders)
+                        best_prices.setdefault(type_id, {})[key] = price
+            except Exception:
+                pass
+
+    async with httpx.AsyncClient() as client:
+        # Process in batches of 20 concurrent requests
+        for i in range(0, len(type_ids), 20):
+            batch = type_ids[i : i + 20]
+            await asyncio.gather(*[fetch_type(client, tid) for tid in batch])
+
+    if not best_prices:
+        return 0
+
+    # Upsert into market_prices — preserving adjusted/average from existing rows
+    for type_id, prices in best_prices.items():
+        stmt = (
+            sqlite_insert(MarketPrice)
+            .values(
+                type_id=type_id,
+                buy_price=prices.get("buy_price"),
+                sell_price=prices.get("sell_price"),
+                last_updated=datetime.utcnow(),
+            )
+            .on_conflict_do_update(
+                index_elements=["type_id"],
+                set_={
+                    "buy_price": prices.get("buy_price"),
+                    "sell_price": prices.get("sell_price"),
+                    "last_updated": datetime.utcnow(),
+                },
+            )
+        )
+        await db.execute(stmt)
+
+    await db.commit()
+    return len(best_prices)
+
+
+# ---------------------------------------------------------------------------
 # Industry cost indexes (global, no auth required)
 # ---------------------------------------------------------------------------
 

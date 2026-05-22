@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.database import init_db
-from app.routers import assets, auth, blueprints, characters, industry, market, sde
+from app.routers import assets, auth, blueprints, characters, industry, market, sde, settings
 
 
 @asynccontextmanager
@@ -28,6 +28,7 @@ app.include_router(blueprints.router)
 app.include_router(industry.router)
 app.include_router(market.router)
 app.include_router(sde.router)
+app.include_router(settings.router)
 
 
 @app.get("/", response_class=HTMLResponse)

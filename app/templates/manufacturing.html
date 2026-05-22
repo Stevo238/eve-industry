@@ -5,9 +5,16 @@
   <div>
     <div class="page-title">Manufacturing Analysis</div>
     <div class="page-sub">
-      {{ total }} blueprint(s) analysed ·
+      {{ total }} blueprint(s) ·
       <span class="text-success">{{ buildable_count }} buildable now</span>
+      {% if inbound_isk_m3 or outbound_isk_m3 %}
+        · Shipping: {{ "{:,.0f}".format(inbound_isk_m3) }}/m³ in,
+          {{ "{:,.0f}".format(outbound_isk_m3) }}/m³ out
+      {% endif %}
     </div>
+  </div>
+  <div style="display:flex; gap:8px; align-items:center">
+    <a href="/settings" class="btn btn-ghost btn-sm">⚙ Settings</a>
   </div>
 </div>
 
@@ -20,6 +27,27 @@
 {% endif %}
 {% endif %}
 
+{# ── Market price banner ───────────────────────────────────────────────────── #}
+{% if not has_order_prices %}
+<div class="alert alert-warning" style="display:flex; align-items:center; gap:16px;">
+  <span>⚠ No Jita buy/sell prices loaded yet — profitability columns will be empty.</span>
+  <form method="post" action="/industry/fetch-prices" style="margin:0"
+        hx-post="/industry/fetch-prices" hx-target="#price-status" hx-swap="outerHTML">
+    <button type="submit" class="btn btn-primary btn-sm">Fetch Jita Prices</button>
+  </form>
+</div>
+{% else %}
+<div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; font-size:12px; color:var(--text-muted)">
+  ✓ Jita prices loaded ·
+  <form method="post" action="/industry/fetch-prices" style="margin:0"
+        hx-post="/industry/fetch-prices" hx-target="#price-status" hx-swap="outerHTML">
+    <button type="submit" class="btn btn-ghost btn-sm">↻ Refresh Prices</button>
+  </form>
+</div>
+{% endif %}
+<div id="price-status"></div>
+
+{# ── Filter bar ────────────────────────────────────────────────────────────── #}
 <form method="get" action="/industry/manufacturing">
   <div class="filter-bar">
     <label>Runs:
@@ -44,25 +72,33 @@
         <tr>
           <th>Product</th>
           <th>Blueprint</th>
-          <th>Character</th>
           <th style="text-align:center">ME</th>
           <th style="text-align:center">Runs</th>
           <th>Status</th>
-          <th>Missing Materials</th>
-          <th>Missing Skills</th>
           <th class="td-right">Mat. Cost</th>
+          <th class="td-right">Sell Mats</th>
+          <th class="td-right">Product Price</th>
+          <th class="td-right">Net Profit</th>
+          <th class="td-right">vs Sell Mats</th>
+          <th>Verdict</th>
           <th style="text-align:center">Time</th>
         </tr>
       </thead>
       <tbody>
         {% for opt in options %}
-        <tr>
-          <td><strong>{{ opt.product_name }}</strong></td>
-          <td class="text-muted" style="font-size:12px">{{ opt.blueprint_name }}</td>
-          <td class="text-muted">
-            {% for char in characters %}
-              {% if char.character_id == opt.character_id %}{{ char.name }}{% endif %}
-            {% endfor %}
+        {% set has_prices = opt.product_sell_price > 0 %}
+        <tr class="{% if opt.recommendation == 'manufacture' %}row-profitable{% elif has_prices %}row-unprofitable{% endif %}">
+          <td>
+            <strong>{{ opt.product_name }}</strong>
+            {% if opt.qty_produced > 1 %}
+              <span class="text-muted" style="font-size:11px">×{{ opt.qty_produced }}</span>
+            {% endif %}
+          </td>
+          <td class="text-muted" style="font-size:11px">
+            {{ opt.blueprint_name }}<br>
+            <span>ME{{ opt.blueprint_me }} ·
+            {% for char in characters %}{% if char.character_id == opt.character_id %}{{ char.name }}{% endif %}{% endfor %}
+            </span>
           </td>
           <td style="text-align:center"><span class="me-label">ME{{ opt.blueprint_me }}</span></td>
           <td style="text-align:center">{{ opt.runs }}</td>
@@ -70,45 +106,85 @@
             {% if opt.can_build_now %}
               <span class="badge badge-ok">✓ Ready</span>
             {% else %}
-              <span class="badge badge-warn">⚠ Incomplete</span>
+              {% set short_count = opt.materials | selectattr('shortage', 'gt', 0) | list | length %}
+              <span class="badge badge-warn" title="{% for m in opt.materials | selectattr('shortage','gt',0) %}{{ m.name }}: need {{ '{:,}'.format(m.shortage) }}&#10;{% endfor %}">
+                {{ short_count }} missing
+              </span>
             {% endif %}
-          </td>
-          <td>
-            {% set short = opt.materials | selectattr('shortage', 'gt', 0) | list %}
-            {% if short %}
-              <div class="mat-list">
-                {% for mat in short[:3] %}
-                  <div class="mat-row">
-                    <span class="mat-name mat-short">{{ mat.name }}</span>
-                    <span class="mat-qty">need {{ "{:,}".format(mat.shortage) }}</span>
-                  </div>
-                {% endfor %}
-                {% if short | length > 3 %}
-                  <div class="text-muted" style="font-size:11px">+{{ short | length - 3 }} more…</div>
-                {% endif %}
-              </div>
-            {% else %}
-              <span class="text-success" style="font-size:12px">All available</span>
-            {% endif %}
-          </td>
-          <td>
             {% if opt.missing_skills %}
-              <div style="font-size:11px; color:var(--error)">
-                {% for s in opt.missing_skills[:2] %}{{ s }}<br>{% endfor %}
-                {% if opt.missing_skills | length > 2 %}+{{ opt.missing_skills | length - 2 }} more{% endif %}
-              </div>
-            {% else %}
-              <span class="text-success" style="font-size:12px">✓</span>
+              <span class="badge badge-error" title="{{ opt.missing_skills | join(', ') }}">
+                {{ opt.missing_skills | length }} skill{{ 's' if opt.missing_skills | length > 1 }}
+              </span>
             {% endif %}
           </td>
+
+          {# Material cost: owned at buy price (opportunity) + missing at sell price #}
           <td class="td-right">
-            {% if opt.estimated_material_cost > 0 %}
-              <span class="isk">{{ "{:,.0f}".format(opt.estimated_material_cost) }}</span>
+            {% if opt.total_material_cost > 0 %}
+              <span class="isk">{{ "{:,.0f}".format(opt.total_material_cost) }}</span>
+              {% if opt.material_cost_to_buy > 0 and opt.material_cost_owned > 0 %}
+                <div style="font-size:10px; color:var(--text-muted)">
+                  own: {{ "{:,.0f}".format(opt.material_cost_owned) }}<br>
+                  buy: {{ "{:,.0f}".format(opt.material_cost_to_buy) }}
+                </div>
+              {% endif %}
+            {% else %}<span class="text-muted">—</span>{% endif %}
+          </td>
+
+          {# Value of selling all materials to buy orders immediately #}
+          <td class="td-right">
+            {% if opt.sell_materials_value > 0 %}
+              <span class="isk">{{ "{:,.0f}".format(opt.sell_materials_value) }}</span>
+            {% else %}<span class="text-muted">—</span>{% endif %}
+          </td>
+
+          {# Product sell price (best Jita sell order × qty) #}
+          <td class="td-right">
+            {% if has_prices %}
+              <span class="isk">{{ "{:,.0f}".format(opt.gross_revenue) }}</span>
+              <div style="font-size:10px; color:var(--text-muted)">
+                {{ "{:,.0f}".format(opt.product_sell_price) }} ea
+              </div>
+            {% else %}<span class="text-muted">—</span>{% endif %}
+          </td>
+
+          {# Net profit after all costs #}
+          <td class="td-right">
+            {% if has_prices %}
+              {% if opt.net_profit_manufacture >= 0 %}
+                <span class="text-success isk">+{{ "{:,.0f}".format(opt.net_profit_manufacture) }}</span>
+              {% else %}
+                <span class="text-error isk">{{ "{:,.0f}".format(opt.net_profit_manufacture) }}</span>
+              {% endif %}
+              <div style="font-size:10px; color:var(--text-muted)" title="Fees: tax {{ '{:,.0f}'.format(opt.sales_tax) }}, broker {{ '{:,.0f}'.format(opt.broker_fee) }}, mfg {{ '{:,.0f}'.format(opt.manufacturing_fee) }}{% if opt.inbound_shipping_cost %}, ship-in {{ '{:,.0f}'.format(opt.inbound_shipping_cost) }}{% endif %}{% if opt.outbound_shipping_cost %}, ship-out {{ '{:,.0f}'.format(opt.outbound_shipping_cost) }}{% endif %}">
+                fees: {{ "{:,.0f}".format(opt.sales_tax + opt.broker_fee + opt.manufacturing_fee + opt.inbound_shipping_cost + opt.outbound_shipping_cost) }}
+              </div>
+            {% else %}<span class="text-muted">—</span>{% endif %}
+          </td>
+
+          {# Delta vs selling materials #}
+          <td class="td-right">
+            {% if has_prices %}
+              {% if opt.profit_delta >= 0 %}
+                <span class="text-success isk">+{{ "{:,.0f}".format(opt.profit_delta) }}</span>
+              {% else %}
+                <span class="text-error isk">{{ "{:,.0f}".format(opt.profit_delta) }}</span>
+              {% endif %}
+            {% else %}<span class="text-muted">—</span>{% endif %}
+          </td>
+
+          {# Verdict #}
+          <td>
+            {% if not has_prices %}
+              <span class="text-muted" style="font-size:11px">no price</span>
+            {% elif opt.recommendation == 'manufacture' %}
+              <span class="badge badge-ok">✓ Manufacture</span>
             {% else %}
-              <span class="text-muted">—</span>
+              <span class="badge badge-warn">Sell mats</span>
             {% endif %}
           </td>
-          <td style="text-align:center; font-size:12px; color:var(--text-muted)">
+
+          <td style="text-align:center; font-size:11px; color:var(--text-muted)">
             {% if opt.time_seconds > 0 %}
               {% set h = opt.time_seconds // 3600 %}
               {% set m = (opt.time_seconds % 3600) // 60 %}
@@ -121,6 +197,14 @@
     </table>
   </div>
 </div>
+
+<div style="margin-top:12px; font-size:11px; color:var(--text-muted); line-height:1.8">
+  <strong>Pricing notes:</strong>
+  Mat. Cost = owned materials at Jita buy-order price (opportunity cost) + missing materials at Jita sell-order price (acquisition cost) ·
+  Net Profit = Revenue − material cost − shipping − sales tax − broker fee − mfg fee ·
+  vs Sell Mats = Net Profit minus the value of selling all input materials to buy orders
+</div>
+
 {% elif sde_available and characters %}
 <div class="card">
   <div style="text-align:center; padding:30px; color:var(--text-muted)">
@@ -128,4 +212,10 @@
   </div>
 </div>
 {% endif %}
+
+<style>
+tr.row-profitable td { background: rgba(var(--success-rgb, 60,180,80), 0.06); }
+tr.row-unprofitable td { background: rgba(var(--error-rgb, 220,60,60), 0.04); }
+.text-error { color: var(--error, #e05555); }
+</style>
 {% endblock %}

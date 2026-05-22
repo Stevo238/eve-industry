@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
@@ -8,9 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.engine.manufacturing import get_all_manufacturing_options
+from app.esi.sync import sync_blueprint_market_prices
 from app.models.character import Character
 from app.models.industry import IndustryJob
+from app.models.market import MarketPrice
 from app.models.sde import SdeType
+from app.routers.settings import get_settings
 
 ACTIVITY_NAMES = {
     1: "Manufacturing",
@@ -23,6 +26,9 @@ ACTIVITY_NAMES = {
 
 router = APIRouter(prefix="/industry", tags=["industry"])
 templates = Jinja2Templates(directory="app/templates")
+
+# Simple progress flag for background market price fetch
+_price_sync_status: dict = {"running": False, "done": 0, "error": ""}
 
 
 @router.get("/jobs", response_class=HTMLResponse)
@@ -47,7 +53,6 @@ async def jobs_page(
     result = await db.execute(stmt)
     jobs = result.scalars().all()
 
-    # Resolve type names
     now = datetime.utcnow()
     job_rows = []
     for job in jobs:
@@ -59,16 +64,14 @@ async def jobs_page(
             h, rem = divmod(int(delta.total_seconds()), 3600)
             m = rem // 60
             time_remaining = f"{h}h {m}m"
-        job_rows.append(
-            {
-                "job": job,
-                "bp_name": bp_type.name if bp_type else f"Type {job.blueprint_type_id}",
-                "prod_name": prod_type.name if prod_type else "",
-                "activity": ACTIVITY_NAMES.get(job.activity_id, f"Activity {job.activity_id}"),
-                "char_name": char_map.get(job.character_id, str(job.character_id)),
-                "time_remaining": time_remaining,
-            }
-        )
+        job_rows.append({
+            "job": job,
+            "bp_name": bp_type.name if bp_type else f"Type {job.blueprint_type_id}",
+            "prod_name": prod_type.name if prod_type else "",
+            "activity": ACTIVITY_NAMES.get(job.activity_id, f"Activity {job.activity_id}"),
+            "char_name": char_map.get(job.character_id, str(job.character_id)),
+            "time_remaining": time_remaining,
+        })
 
     return templates.TemplateResponse(
         "industry.html",
@@ -94,6 +97,21 @@ async def manufacturing_page(
     characters = chars_result.scalars().all()
     character_ids = [c.character_id for c in characters]
 
+    # Load user settings
+    cfg = await get_settings(db)
+    inbound_isk_m3 = float(cfg.get("inbound_shipping_isk_per_m3", "0") or 0)
+    outbound_isk_m3 = float(cfg.get("outbound_shipping_isk_per_m3", "0") or 0)
+    sales_tax_pct = float(cfg.get("sales_tax_pct", "2.0") or 2.0)
+    broker_fee_pct = float(cfg.get("broker_fee_pct", "3.0") or 3.0)
+
+    # Check if we have any Jita buy/sell prices at all
+    price_row = (
+        await db.execute(
+            select(MarketPrice).where(MarketPrice.buy_price.isnot(None)).limit(1)
+        )
+    ).scalar_one_or_none()
+    has_order_prices = price_row is not None
+
     options = []
     sde_available = True
     sde_error = ""
@@ -105,8 +123,12 @@ async def manufacturing_page(
                 runs=runs,
                 structure_me_bonus=structure_me / 100.0,
                 buildable_only=buildable_only,
+                inbound_isk_per_m3=inbound_isk_m3,
+                outbound_isk_per_m3=outbound_isk_m3,
+                sales_tax_pct=sales_tax_pct,
+                broker_fee_pct=broker_fee_pct,
             )
-        except Exception as exc:
+        except Exception:
             import traceback
             sde_available = False
             sde_error = traceback.format_exc()
@@ -124,5 +146,61 @@ async def manufacturing_page(
             "sde_error": sde_error,
             "total": len(options),
             "buildable_count": sum(1 for o in options if o.can_build_now),
+            "has_order_prices": has_order_prices,
+            "price_sync_status": _price_sync_status,
+            "inbound_isk_m3": inbound_isk_m3,
+            "outbound_isk_m3": outbound_isk_m3,
+            "sales_tax_pct": sales_tax_pct,
+            "broker_fee_pct": broker_fee_pct,
         },
     )
+
+
+@router.post("/fetch-prices", response_class=HTMLResponse)
+async def fetch_market_prices(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    """Trigger a background fetch of Jita buy/sell prices for blueprint types."""
+    if _price_sync_status["running"]:
+        return HTMLResponse(
+            '<div class="alert alert-info" hx-get="/industry/prices-status" '
+            'hx-trigger="every 3s">Already fetching prices…</div>'
+        )
+    background_tasks.add_task(_run_price_sync)
+    return HTMLResponse(
+        '<div class="alert alert-info" hx-get="/industry/prices-status" '
+        'hx-trigger="every 3s">Fetching Jita prices in background…</div>'
+    )
+
+
+@router.get("/prices-status", response_class=HTMLResponse)
+async def prices_status(request: Request):
+    s = _price_sync_status
+    if s["error"]:
+        return HTMLResponse(f'<div class="alert alert-error">Price fetch error: {s["error"]}</div>')
+    if s["running"]:
+        return HTMLResponse(
+            '<div class="alert alert-info" hx-get="/industry/prices-status" '
+            f'hx-trigger="every 3s">Fetching Jita prices… ({s["done"]} types done)</div>'
+        )
+    if s["done"]:
+        return HTMLResponse(
+            f'<div class="alert alert-success">✓ Fetched prices for {s["done"]} types. '
+            f'<a href="/industry/manufacturing">Refresh analysis</a></div>'
+        )
+    return HTMLResponse("")
+
+
+async def _run_price_sync():
+    from app.database import AsyncSessionLocal
+    _price_sync_status.update({"running": True, "done": 0, "error": ""})
+    try:
+        async with AsyncSessionLocal() as db:
+            count = await sync_blueprint_market_prices(db)
+            _price_sync_status["done"] = count
+    except Exception as exc:
+        _price_sync_status["error"] = str(exc)
+    finally:
+        _price_sync_status["running"] = False
