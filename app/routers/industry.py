@@ -91,16 +91,20 @@ async def manufacturing_page(
     runs: int = 1,
     buildable_only: bool = False,
     structure_me: float = 0.0,
+    inbound_isk_m3: float | None = None,
+    outbound_isk_m3: float | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     chars_result = await db.execute(select(Character).order_by(Character.name))
     characters = chars_result.scalars().all()
     character_ids = [c.character_id for c in characters]
 
-    # Load user settings
+    # Load user settings as defaults; query params override them if provided
     cfg = await get_settings(db)
-    inbound_isk_m3 = float(cfg.get("inbound_shipping_isk_per_m3", "0") or 0)
-    outbound_isk_m3 = float(cfg.get("outbound_shipping_isk_per_m3", "0") or 0)
+    if inbound_isk_m3 is None:
+        inbound_isk_m3 = float(cfg.get("inbound_shipping_isk_per_m3", "0") or 0)
+    if outbound_isk_m3 is None:
+        outbound_isk_m3 = float(cfg.get("outbound_shipping_isk_per_m3", "0") or 0)
     sales_tax_pct = float(cfg.get("sales_tax_pct", "2.0") or 2.0)
     broker_fee_pct = float(cfg.get("broker_fee_pct", "3.0") or 3.0)
 

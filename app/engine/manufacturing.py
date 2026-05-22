@@ -66,7 +66,13 @@ class MaterialRequirement:
 
     @property
     def total_volume(self) -> float:
+        """Total volume of all units needed."""
         return self.volume_each * self.quantity_needed
+
+    @property
+    def inbound_volume(self) -> float:
+        """Volume that must be shipped IN — only the units you don't already own."""
+        return self.volume_each * self.shortage
 
 
 @dataclass
@@ -96,11 +102,12 @@ class ManufacturingOption:
     # Material costs
     material_cost_owned: float = 0.0   # opportunity cost of owned materials
     material_cost_to_buy: float = 0.0  # acquisition cost of missing materials
-    material_volume: float = 0.0       # total m³ of all materials needed
+    material_volume: float = 0.0         # total m³ of all materials needed
+    inbound_volume: float = 0.0          # m³ that must be shipped in (shortage only)
 
     # Logistics
-    inbound_shipping_cost: float = 0.0   # materials to production location
-    outbound_shipping_cost: float = 0.0  # finished goods to market
+    inbound_shipping_cost: float = 0.0   # inbound_volume × inbound ISK/m³
+    outbound_shipping_cost: float = 0.0  # product volume × outbound ISK/m³
 
     # EVE market fees (applied when selling product via market order)
     manufacturing_fee: float = 0.0
@@ -373,7 +380,12 @@ async def analyse_blueprint(
     )
 
     # Logistics costs
-    inbound_shipping = material_volume_total * inbound_isk_per_m3
+    # Inbound: only materials you need to BUY and ship in (shortage volume).
+    # Materials you already own are at your production location — no shipping needed.
+    inbound_volume = sum(m.inbound_volume for m in materials)
+    inbound_shipping = inbound_volume * inbound_isk_per_m3
+
+    # Outbound: finished goods shipped to market.
     outbound_volume = prod_volume * qty_produced
     outbound_shipping = outbound_volume * outbound_isk_per_m3
 
@@ -412,6 +424,7 @@ async def analyse_blueprint(
         material_cost_owned=material_cost_owned,
         material_cost_to_buy=material_cost_to_buy,
         material_volume=material_volume_total,
+        inbound_volume=inbound_volume,
         inbound_shipping_cost=inbound_shipping,
         outbound_shipping_cost=outbound_shipping,
         manufacturing_fee=manufacturing_fee,
