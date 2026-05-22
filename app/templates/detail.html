@@ -78,7 +78,19 @@
     {% else %}
     <div class="stat-value" style="font-size:18px; color:var(--error)">{{ isk(stats.net_profit) }}</div>
     {% endif %}
-    <div class="stat-sub">before tax &amp; fees</div>
+    <div class="stat-sub">after shipping, before tax</div>
+  </div>
+  {% endif %}
+  {% if stats.total_inbound_shipping > 0 or stats.outbound_shipping > 0 %}
+  <div class="stat-card" style="border-color:var(--text-muted)">
+    <div class="stat-label">Shipping</div>
+    <div class="stat-value" style="font-size:18px; color:var(--text-muted)">
+      {{ isk(stats.total_inbound_shipping + stats.outbound_shipping) }}
+    </div>
+    <div class="stat-sub">
+      {% if stats.total_inbound_shipping > 0 %}↓ {{ isk(stats.total_inbound_shipping) }} in{% endif %}
+      {% if stats.outbound_shipping > 0 %} ↑ {{ isk(stats.outbound_shipping) }} out{% endif %}
+    </div>
   </div>
   {% endif %}
   <div class="stat-card">
@@ -137,7 +149,10 @@
             <th class="td-right">True Cost</th>
             <th class="td-right" style="font-size:10px; color:var(--text-muted)" title="Owned qty × buy order price (opportunity cost)">↳ Owned</th>
             <th class="td-right" style="font-size:10px; color:var(--error)" title="Missing qty × sell order price (acquisition cost)">↳ To Buy</th>
-            <th class="td-right">Volume (m³)</th>
+            {% if inbound_isk_m3 > 0 %}
+            <th class="td-right" style="color:var(--warning)" title="Shipping cost on shortage volume only">Ship IN</th>
+            {% endif %}
+            <th class="td-right">Vol short (m³)</th>
           </tr>
         </thead>
         <tbody>
@@ -162,13 +177,13 @@
             <td class="td-right {% if m.shortage_cost > 0 %}text-error isk{% else %}text-success{% endif %}">
               {% if m.shortage_cost > 0 %}{{ isk(m.shortage_cost) }}{% else %}✓ Have{% endif %}
             </td>
+            {% if inbound_isk_m3 > 0 %}
+            <td class="td-right {% if m.inbound_shipping > 0 %}text-warning isk{% else %}text-muted{% endif %}" style="font-size:12px">
+              {% if m.inbound_shipping > 0 %}{{ isk(m.inbound_shipping) }}{% else %}—{% endif %}
+            </td>
+            {% endif %}
             <td class="td-right text-muted" style="font-size:11px">
-              {% if m.total_volume > 0 %}
-                {{ "{:,.1f}".format(m.total_volume) }}
-                {% if m.shortage_volume > 0 %}
-                  <div class="text-error" style="font-size:10px">({{ "{:,.1f}".format(m.shortage_volume) }} to ship)</div>
-                {% endif %}
-              {% else %}—{% endif %}
+              {% if m.shortage_volume > 0 %}{{ "{:,.1f}".format(m.shortage_volume) }}{% else %}—{% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -177,7 +192,7 @@
           <tr style="border-top:2px solid var(--border)">
             <td colspan="4" style="padding:8px 12px; font-size:12px; color:var(--text-muted)">
               <strong style="color:var(--text)">Totals</strong>
-              <span style="font-size:11px; margin-left:8px">true cost = owned at opportunity price + missing at market price</span>
+              <span style="font-size:11px; margin-left:8px">owned at opportunity cost + missing at market price</span>
             </td>
             <td class="td-right isk" style="font-weight:700; padding:8px 12px">
               {{ isk(raw_materials | sum(attribute='total_cost')) }}
@@ -189,8 +204,13 @@
               {% set shortage_total = raw_materials | sum(attribute='shortage_cost') %}
               {% if shortage_total > 0 %}{{ isk(shortage_total) }}{% else %}<span class="text-success">—</span>{% endif %}
             </td>
+            {% if inbound_isk_m3 > 0 %}
+            <td class="td-right text-warning isk" style="font-weight:700; padding:8px 12px; font-size:12px">
+              {{ isk(raw_materials | sum(attribute='inbound_shipping')) }}
+            </td>
+            {% endif %}
             <td class="td-right text-muted" style="padding:8px 12px; font-size:11px">
-              {{ "{:,.1f}".format(raw_materials | sum(attribute='shortage_volume')) }} m³ to ship
+              {{ "{:,.1f}".format(raw_materials | sum(attribute='shortage_volume')) }} m³
             </td>
           </tr>
         </tfoot>
@@ -251,15 +271,29 @@
         <span class="bom-stat-val isk">{{ isk(node.total_sell_value) }}</span>
         <span class="bom-stat-sub">{{ isk(node.buy_price) }} ea</span>
       </div>
+      {% if node.total_inbound_shipping > 0 %}
+      <div class="bom-stat-item">
+        <span class="bom-stat-label">Ship IN</span>
+        <span class="bom-stat-val" style="color:var(--text-muted)">{{ isk(node.total_inbound_shipping) }}</span>
+        <span class="bom-stat-sub">raw mats to buy only</span>
+      </div>
+      {% endif %}
+      {% if node.outbound_shipping_cost > 0 %}
+      <div class="bom-stat-item">
+        <span class="bom-stat-label">Ship OUT</span>
+        <span class="bom-stat-val" style="color:var(--text-muted)">{{ isk(node.outbound_shipping_cost) }}</span>
+        <span class="bom-stat-sub">{{ "{:,.1f}".format(node.total_volume_needed) }} m³</span>
+      </div>
+      {% endif %}
       <div class="bom-stat-item">
         <span class="bom-stat-label">Est. Profit</span>
-        {% set profit = node.total_sell_value - node.make_cost %}
+        {% set profit = node.total_sell_value - node.make_cost - node.outbound_shipping_cost %}
         {% if profit >= 0 %}
           <span class="bom-stat-val text-success">+{{ isk(profit) }}</span>
         {% else %}
           <span class="bom-stat-val text-error">{{ isk(profit) }}</span>
         {% endif %}
-        <span class="bom-stat-sub">before tax &amp; fees</span>
+        <span class="bom-stat-sub">after shipping, before tax</span>
       </div>
       {% endif %}
       <div class="bom-stat-item">
@@ -363,9 +397,18 @@
       {% else %}
       <div class="bom-cost-row"><span class="bom-cost-label text-muted">No price data</span></div>
       {% endif %}
-      {% if node.volume_each > 0 and node.shortage > 0 %}
+      {% if node.shortage > 0 and node.inbound_shipping_cost > 0 %}
       <div class="bom-cost-row">
         <span class="bom-cost-label">Ship in</span>
+        <span class="bom-cost-val text-warning isk">{{ isk(node.inbound_shipping_cost) }}</span>
+      </div>
+      <div class="bom-cost-row">
+        <span class="bom-cost-label text-muted" style="padding-left:8px">↳ {{ "{:,.1f}".format(node.total_volume_short) }} m³</span>
+        <span class="bom-cost-val text-muted" style="font-size:11px">shortage only</span>
+      </div>
+      {% elif node.shortage > 0 and node.volume_each > 0 %}
+      <div class="bom-cost-row">
+        <span class="bom-cost-label text-muted">Volume short</span>
         <span class="bom-cost-val text-muted" style="font-size:11px">{{ "{:,.1f}".format(node.total_volume_short) }} m³</span>
       </div>
       {% endif %}

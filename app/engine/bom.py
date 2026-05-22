@@ -54,6 +54,10 @@ class BOMNode:
 
     children: list[BOMNode] = field(default_factory=list)
 
+    # Shipping rates — set once at tree build time, same value on every node
+    inbound_isk_per_m3: float = 0.0   # ISK/m³ to ship purchased materials in
+    outbound_isk_per_m3: float = 0.0  # ISK/m³ to ship finished product out
+
     # ── Derived properties ───────────────────────────────────────────────────
 
     @property
@@ -103,23 +107,60 @@ class BOMNode:
         """ISK received by selling quantity_needed to buy orders."""
         return self.quantity_needed * self.buy_price
 
+    # ── Shipping ─────────────────────────────────────────────────────────────
+
+    @property
+    def inbound_shipping_cost(self) -> float:
+        """
+        Shipping cost for THIS node's shortage only.
+        Rules:
+          - Leaf nodes (raw materials you buy): ship the shortage volume in.
+          - Intermediate nodes (manufactured locally): 0 — the sub-component is
+            produced at your production facility, so it doesn't need to be
+            shipped in. Its RAW MATERIAL children still carry their own shipping.
+        """
+        if self.children:
+            return 0.0  # manufactured here — no inbound shipping on the node itself
+        return self.shortage * self.volume_each * self.inbound_isk_per_m3
+
+    @property
+    def total_inbound_shipping(self) -> float:
+        """Recursive sum of inbound shipping across all leaf descendants."""
+        if not self.children:
+            return self.inbound_shipping_cost
+        return sum(c.total_inbound_shipping for c in self.children)
+
+    @property
+    def outbound_shipping_cost(self) -> float:
+        """
+        Shipping the finished product from the production site to market.
+        Only meaningful on the root product — call it there explicitly.
+        """
+        return self.quantity_needed * self.volume_each * self.outbound_isk_per_m3
+
+    # ── Cost rollups ─────────────────────────────────────────────────────────
+
     @property
     def make_cost(self) -> float:
         """
-        Recursive realistic cost to produce this item.
-        - Leaf nodes: owned qty at opportunity cost + missing qty at market buy price.
-        - Intermediate nodes with blueprints: recurse into their children.
+        Recursive realistic cost to manufacture this item, including inbound
+        shipping on every raw material leaf that has a shortage.
+
+        - Leaf nodes: true_material_cost + inbound_shipping_cost
+        - Intermediate nodes: sum of children's make_cost (each child handles
+          its own shipping at its leaf level; the intermediate itself ships nothing)
         """
         if not self.children:
-            return self.true_material_cost
+            return self.true_material_cost + self.inbound_shipping_cost
         return sum(
-            (c.make_cost if (c.has_blueprint and c.children) else c.true_material_cost)
+            (c.make_cost if (c.has_blueprint and c.children) else
+             c.true_material_cost + c.inbound_shipping_cost)
             for c in self.children
         )
 
     @property
     def make_vs_buy_saving(self) -> float:
-        """Positive = cheaper to make. Negative = cheaper to buy from market."""
+        """Positive = cheaper to make (including shipping). Negative = cheaper to buy."""
         if not self.children:
             return 0.0
         return self.total_buy_cost - self.make_cost
@@ -127,8 +168,8 @@ class BOMNode:
     @property
     def is_exit_point(self) -> bool:
         """
-        True when selling this manufactured intermediate yields more ISK than
-        its make cost — a profitable 'sell here instead' opportunity.
+        True when selling this manufactured intermediate to buy orders yields
+        more ISK than its full make cost (materials + inbound shipping).
         """
         if not (self.has_blueprint and self.children and self.buy_price > 0):
             return False
@@ -136,7 +177,7 @@ class BOMNode:
 
     @property
     def exit_profit(self) -> float:
-        """Extra ISK gained by selling this item vs using it as a sub-material."""
+        """Extra ISK from selling this item vs consuming it as a sub-material."""
         return self.total_sell_value - self.make_cost
 
     @property
@@ -151,10 +192,12 @@ class BOMNode:
 @dataclass
 class BOMStats:
     """Aggregate stats for the whole BOM tree — passed to the template."""
-    total_make_cost: float = 0.0
-    total_buy_cost_if_raw: float = 0.0   # cost if you bought every raw material
+    total_make_cost: float = 0.0         # materials + inbound shipping
+    total_material_cost: float = 0.0     # materials only (no shipping)
+    total_inbound_shipping: float = 0.0  # sum of inbound shipping on all raw leaves
+    outbound_shipping: float = 0.0       # outbound shipping on the finished product
     revenue: float = 0.0                 # sell root product to buy orders
-    net_profit: float = 0.0
+    net_profit: float = 0.0             # revenue - make_cost - outbound_shipping
     intermediate_count: int = 0          # nodes that have a blueprint (excl. root)
     raw_material_count: int = 0          # true leaf nodes
     missing_material_count: int = 0      # nodes with shortage > 0
@@ -166,8 +209,12 @@ def collect_stats(root: BOMNode) -> BOMStats:
     """Walk the tree and gather aggregate statistics."""
     stats = BOMStats()
     stats.total_make_cost = root.make_cost
+    stats.total_inbound_shipping = root.total_inbound_shipping
+    stats.outbound_shipping = root.outbound_shipping_cost
+    # material-only cost = make_cost minus all shipping
+    stats.total_material_cost = root.make_cost - root.total_inbound_shipping
     stats.revenue = root.total_sell_value
-    stats.net_profit = root.total_sell_value - root.make_cost
+    stats.net_profit = root.total_sell_value - root.make_cost - root.outbound_shipping_cost
 
     def walk(node: BOMNode, is_root: bool = False) -> None:
         if node.job_time_seconds:
@@ -188,7 +235,7 @@ def collect_stats(root: BOMNode) -> BOMStats:
     return stats
 
 
-def collect_raw_materials(root: BOMNode) -> list[dict]:
+def collect_raw_materials(root: BOMNode, inbound_isk_per_m3: float = 0.0) -> list[dict]:
     """
     Walk the whole tree and aggregate all leaf nodes (true raw materials —
     no blueprint expansion) into a flat shopping list keyed by type_id.
@@ -237,6 +284,9 @@ def collect_raw_materials(root: BOMNode) -> list[dict]:
         item["shortage_cost"] = shortage * item["sell_price"]   # what you still need to spend
         item["total_volume"] = qty * item["volume_each"]
         item["shortage_volume"] = shortage * item["volume_each"]
+        # Inbound shipping — only on the units you still need to buy and ship in
+        item["inbound_shipping"] = shortage * item["volume_each"] * inbound_isk_per_m3
+        item["total_with_shipping"] = item["total_cost"] + item["inbound_shipping"]
         result.append(item)
 
     # Sort: unsatisfied first, then by total cost descending
@@ -308,6 +358,8 @@ async def build_bom_tree(
     prices: dict[int, dict],
     visited: set[int] | None = None,
     structure_me_bonus: float = 0.0,
+    inbound_isk_per_m3: float = 0.0,
+    outbound_isk_per_m3: float = 0.0,
     depth: int = 0,
 ) -> BOMNode:
     """Recursively build the BOM tree for the given item and quantity."""
@@ -329,6 +381,8 @@ async def build_bom_tree(
         buy_price=p.get("buy", 0.0),
         sell_price=p.get("sell", 0.0),
         volume_each=volume,
+        inbound_isk_per_m3=inbound_isk_per_m3,
+        outbound_isk_per_m3=outbound_isk_per_m3,
     )
 
     if depth >= MAX_DEPTH or type_id in visited:
@@ -400,6 +454,8 @@ async def build_bom_tree(
             blueprint_map, inventory, prices,
             visited=set(new_visited),
             structure_me_bonus=structure_me_bonus,
+            inbound_isk_per_m3=inbound_isk_per_m3,
+            outbound_isk_per_m3=outbound_isk_per_m3,
             depth=depth + 1,
         )
         node.children.append(child)

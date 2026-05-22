@@ -271,14 +271,20 @@ async def detail_page(
                 for row in price_rows
             }
 
+            cfg = await get_settings(db)
+            inbound_isk_m3  = float(cfg.get("inbound_shipping_isk_per_m3", "0") or 0)
+            outbound_isk_m3 = float(cfg.get("outbound_shipping_isk_per_m3", "0") or 0)
+
             try:
                 tree = await build_bom_tree(
                     db, product_type_id, total_qty,
                     blueprint_map, inventory, prices,
                     structure_me_bonus=structure_me / 100.0,
+                    inbound_isk_per_m3=inbound_isk_m3,
+                    outbound_isk_per_m3=outbound_isk_m3,
                 )
                 stats = collect_stats(tree)
-                raw_materials = collect_raw_materials(tree)
+                raw_materials = collect_raw_materials(tree, inbound_isk_per_m3=inbound_isk_m3)
             except Exception:
                 import traceback
                 error = traceback.format_exc()
@@ -295,6 +301,8 @@ async def detail_page(
             "raw_materials": raw_materials,
             "runs": runs,
             "structure_me": structure_me,
+            "inbound_isk_m3": inbound_isk_m3 if blueprint_item_id else 0.0,
+            "outbound_isk_m3": outbound_isk_m3 if blueprint_item_id else 0.0,
             "error": error,
         },
     )
