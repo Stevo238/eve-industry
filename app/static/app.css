@@ -335,3 +335,160 @@ hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
 /* ── Manufacturing table row colouring ─────────────── */
 tr.row-profitable > td { background: rgba(0, 200, 150, 0.06); }
 tr.row-unprofitable > td { background: rgba(224, 82, 96, 0.05); }
+
+/* ════════════════════════════════════════════════════════
+   BOM Detail Tree
+   ════════════════════════════════════════════════════════ */
+
+/* Root product card */
+.bom-root-card {
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.bom-root-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px 18px;
+  background: rgba(0, 180, 216, 0.07);
+  border-bottom: 1px solid var(--border);
+}
+.bom-root-body { padding: 14px 18px; }
+.bom-root-stats { display: flex; gap: 32px; flex-wrap: wrap; }
+.bom-stat-item  { display: flex; flex-direction: column; gap: 2px; }
+.bom-stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
+.bom-stat-val   { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.bom-stat-sub   { font-size: 10px; color: var(--text-muted); }
+
+/* Tier separator */
+.bom-tier-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+}
+.bom-tier-icon { color: var(--accent); font-size: 10px; }
+
+/* Material grids */
+.bom-mat-grid { display: grid; gap: 10px; }
+.bom-grid-l1  { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+
+/* Sub-materials section inside an intermediate card */
+.bom-sub-section {
+  border-top: 1px solid var(--border);
+  padding: 10px 12px 8px;
+  background: rgba(0,0,0,0.15);
+}
+.bom-sub-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.bom-sub-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+/* Base material card */
+.bom-mat-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+
+/* Card state variants */
+.bom-intermediate {
+  border-color: var(--warning);
+  background: rgba(240, 180, 41, 0.04);
+}
+.bom-missing {
+  border-color: var(--error);
+  background: rgba(224, 82, 96, 0.04);
+}
+.bom-exit {
+  border-color: #d4a800;
+  box-shadow: 0 0 10px rgba(212, 168, 0, 0.18);
+  background: rgba(212, 168, 0, 0.05);
+}
+
+/* Card header */
+.bom-mat-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px 6px;
+}
+.bom-mat-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+}
+.bom-mat-qty {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 3px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+/* Card body */
+.bom-mat-body {
+  padding: 4px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+.bom-cost-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.bom-cost-label { color: var(--text-muted); white-space: nowrap; }
+.bom-cost-val   { font-variant-numeric: tabular-nums; text-align: right; }
+
+/* Exit point banner */
+.bom-exit-banner {
+  padding: 8px 12px;
+  background: rgba(212, 168, 0, 0.12);
+  border-top: 1px solid rgba(212, 168, 0, 0.35);
+  font-size: 11px;
+  color: #ffd700;
+  line-height: 1.5;
+}
+
+/* Legend */
+.bom-legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.bom-legend-item { display: flex; align-items: center; gap: 6px; }
+.bom-legend-dot  { width: 12px; height: 12px; border-radius: 2px; border: 1px solid; flex-shrink: 0; }

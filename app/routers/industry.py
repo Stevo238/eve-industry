@@ -7,13 +7,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.engine.manufacturing import get_all_manufacturing_options
+from app.engine.bom import build_bom_tree, build_product_blueprint_map, collect_stats
+from app.engine.manufacturing import get_all_manufacturing_options, get_asset_inventory
 from app.esi.sync import sync_blueprint_market_prices
+from app.models.blueprints import Blueprint
 from app.models.character import Character
 from app.models.industry import IndustryJob
 from app.models.market import MarketPrice
 from app.models.settings import MARKET_HUBS
-from app.models.sde import SdeType
+from app.models.sde import SdeBlueprintProduct, SdeType
 from app.routers.settings import get_settings
 
 ACTIVITY_NAMES = {
@@ -213,3 +215,81 @@ async def _run_price_sync(region_id: int = 10000002):
         _price_sync_status["error"] = str(exc)
     finally:
         _price_sync_status["running"] = False
+
+
+@router.get("/detail", response_class=HTMLResponse)
+async def detail_page(
+    request: Request,
+    blueprint_item_id: int | None = None,
+    runs: int = 1,
+    structure_me: float = 0.0,
+    db: AsyncSession = Depends(get_db),
+):
+    bp_result = await db.execute(select(Blueprint).order_by(Blueprint.type_id))
+    all_blueprints = bp_result.scalars().all()
+
+    blueprint_map, display_list = await build_product_blueprint_map(db, all_blueprints)
+
+    tree = None
+    stats = None
+    selected_prod_name = ""
+    error = ""
+
+    if blueprint_item_id:
+        selected_bp = next((bp for bp in all_blueprints if bp.item_id == blueprint_item_id), None)
+        entry = next((e for e in display_list if e["item_id"] == blueprint_item_id), None)
+
+        if selected_bp and entry:
+            product_type_id = entry["prod_type_id"]
+            selected_prod_name = entry["prod_name"]
+
+            # Resolve qty per run so root quantity = qty_per_run × runs
+            total_qty = runs
+            for act_id in (1, 11):
+                prod_res = await db.execute(
+                    select(SdeBlueprintProduct).where(
+                        SdeBlueprintProduct.blueprint_type_id == selected_bp.type_id,
+                        SdeBlueprintProduct.activity_id == act_id,
+                    )
+                )
+                prod_row = prod_res.scalar_one_or_none()
+                if prod_row:
+                    total_qty = (prod_row.quantity or 1) * runs
+                    break
+
+            inventory = await get_asset_inventory(db)
+
+            price_rows = (await db.execute(select(MarketPrice))).fetchall()
+            prices: dict[int, dict] = {
+                row.type_id: {
+                    "buy": float(row.buy_price or 0.0),
+                    "sell": float(row.sell_price or 0.0),
+                }
+                for row in price_rows
+            }
+
+            try:
+                tree = await build_bom_tree(
+                    db, product_type_id, total_qty,
+                    blueprint_map, inventory, prices,
+                    structure_me_bonus=structure_me / 100.0,
+                )
+                stats = collect_stats(tree)
+            except Exception:
+                import traceback
+                error = traceback.format_exc()
+
+    return templates.TemplateResponse(
+        "detail.html",
+        {
+            "request": request,
+            "blueprints": display_list,
+            "selected_item_id": blueprint_item_id,
+            "selected_prod_name": selected_prod_name,
+            "tree": tree,
+            "stats": stats,
+            "runs": runs,
+            "structure_me": structure_me,
+            "error": error,
+        },
+    )

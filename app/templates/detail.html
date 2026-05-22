@@ -1,0 +1,339 @@
+{% extends "base.html" %}
+{% block title %}Manufacturing Detail — EVE Industry{% endblock %}
+{% block content %}
+
+{# ── Helpers ──────────────────────────────────────────────────────────────── #}
+{% macro isk(v) %}{{ "{:,.0f}".format(v) }}{% endmacro %}
+{% macro qty(v) %}{{ "{:,}".format(v) }}{% endmacro %}
+{% macro time_fmt(s) %}{% if s > 0 %}{% set h = s // 3600 %}{% set m = (s % 3600) // 60 %}{% if h %}{{ h }}h {% endif %}{{ m }}m{% else %}—{% endif %}{% endmacro %}
+
+{# ── Page header ──────────────────────────────────────────────────────────── #}
+<div class="page-header">
+  <div>
+    <div class="page-title">Manufacturing Detail</div>
+    <div class="page-sub">Full bill of materials · recursive sub-component expansion</div>
+  </div>
+  <a href="/industry/manufacturing" class="btn btn-ghost btn-sm">← Overview</a>
+</div>
+
+{# ── Selector form ─────────────────────────────────────────────────────────── #}
+<div class="card" style="margin-bottom:20px">
+  <form method="get" action="/industry/detail">
+    <div class="filter-bar" style="gap:12px; flex-wrap:wrap; align-items:flex-end">
+      <div class="form-row" style="flex:1; min-width:220px">
+        <label class="form-label">Blueprint / Reaction
+          <span class="form-hint">Select what you want to manufacture</span>
+        </label>
+        <select name="blueprint_item_id" style="width:100%; max-width:380px; background:var(--bg-base); border:1px solid var(--border); border-radius:var(--radius); color:var(--text); padding:6px 10px; font-size:13px">
+          <option value="">— choose a blueprint —</option>
+          {% for bp in blueprints %}
+          <option value="{{ bp.item_id }}"
+            {% if selected_item_id == bp.item_id %}selected{% endif %}>
+            {{ bp.prod_name }}
+            {% if bp.activity_label == 'Reaction' %} [Reaction]{% endif %}
+            · ME{{ bp.me }}
+            · {{ 'BPO' if bp.is_bpo else 'BPC' }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <label>Runs:
+        <input type="number" name="runs" value="{{ runs }}" min="1" max="10000" style="width:72px">
+      </label>
+      <label>Structure ME (%):
+        <input type="number" name="structure_me" value="{{ structure_me }}" min="0" max="10" step="0.1" style="width:64px">
+      </label>
+      <button type="submit" class="btn btn-primary">Analyse</button>
+    </div>
+  </form>
+</div>
+
+{% if error %}
+<div class="alert alert-error">
+  <strong>Error building BOM tree:</strong>
+  <pre style="margin-top:8px; font-size:11px; white-space:pre-wrap">{{ error }}</pre>
+</div>
+{% endif %}
+
+{% if not blueprints %}
+<div class="alert alert-warning">No blueprints found. Sync your characters first.</div>
+{% endif %}
+
+{% if tree %}
+
+{# ── Summary stats strip ───────────────────────────────────────────────────── #}
+<div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); margin-bottom:16px">
+  <div class="stat-card">
+    <div class="stat-label">Make Cost</div>
+    <div class="stat-value" style="font-size:18px; color:var(--warning)">{{ isk(stats.total_make_cost) }}</div>
+    <div class="stat-sub">ISK total materials</div>
+  </div>
+  {% if stats.revenue > 0 %}
+  <div class="stat-card">
+    <div class="stat-label">Revenue</div>
+    <div class="stat-value" style="font-size:18px; color:var(--accent)">{{ isk(stats.revenue) }}</div>
+    <div class="stat-sub">sell to buy orders</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Est. Profit</div>
+    {% if stats.net_profit >= 0 %}
+    <div class="stat-value" style="font-size:18px; color:var(--success)">+{{ isk(stats.net_profit) }}</div>
+    {% else %}
+    <div class="stat-value" style="font-size:18px; color:var(--error)">{{ isk(stats.net_profit) }}</div>
+    {% endif %}
+    <div class="stat-sub">before tax &amp; fees</div>
+  </div>
+  {% endif %}
+  <div class="stat-card">
+    <div class="stat-label">Job Time</div>
+    <div class="stat-value" style="font-size:18px">{{ time_fmt(stats.total_job_time) }}</div>
+    <div class="stat-sub">all steps combined</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Sub-jobs</div>
+    <div class="stat-value" style="font-size:18px">{{ stats.intermediate_count }}</div>
+    <div class="stat-sub">intermediate steps</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Raw Materials</div>
+    <div class="stat-value" style="font-size:18px">{{ stats.raw_material_count }}</div>
+    <div class="stat-sub">
+      {% if stats.missing_material_count > 0 %}
+        <span class="text-error">{{ stats.missing_material_count }} missing</span>
+      {% else %}all available{% endif %}
+    </div>
+  </div>
+  {% if stats.exit_point_count > 0 %}
+  <div class="stat-card" style="border-color:#d4a800">
+    <div class="stat-label" style="color:#d4a800">Exit Points</div>
+    <div class="stat-value" style="font-size:18px; color:#ffd700">{{ stats.exit_point_count }}</div>
+    <div class="stat-sub" style="color:#d4a800">sell-here opportunities</div>
+  </div>
+  {% endif %}
+</div>
+
+{# ══════════════════════════════════════════════════════════════════════════════
+   BOM TREE — recursive {% for %} with the `recursive` keyword
+   loop.depth0 == 0 → root product card (full width)
+   loop.depth0 >= 1 → material card (grid cell, may contain own sub-grid)
+   ══════════════════════════════════════════════════════════════════════════════ #}
+
+{% for node in [tree] recursive %}
+
+{# ── ROOT CARD ─────────────────────────────────────────────────────────────── #}
+{% if loop.depth0 == 0 %}
+<div class="bom-root-card">
+  <div class="bom-root-header">
+    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap">
+      {% if node.activity_label == 'Reaction' %}
+        <span class="badge badge-bpc" style="font-size:12px; padding:4px 10px">⚗ Reaction</span>
+      {% else %}
+        <span class="badge badge-ok" style="font-size:12px; padding:4px 10px">⚙ Manufacturing</span>
+      {% endif %}
+      <span style="font-size:18px; font-weight:700; color:var(--text)">{{ node.name }}</span>
+      <span style="color:var(--text-muted); font-size:14px">×{{ qty(node.quantity_needed) }}</span>
+      {% if node.runs_needed %}
+        <span style="color:var(--text-muted); font-size:12px">{{ node.runs_needed }} run{{ 's' if node.runs_needed != 1 }}</span>
+      {% endif %}
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+      <span class="badge {% if node.is_bpo %}badge-bpo{% else %}badge-bpc{% endif %}">
+        {{ 'BPO' if node.is_bpo else 'BPC' }}
+      </span>
+      <span class="badge badge-ok">ME{{ node.blueprint_me }}</span>
+      {% if node.job_time_seconds %}
+        <span style="color:var(--text-muted); font-size:12px">⏱ {{ time_fmt(node.job_time_seconds) }}</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="bom-root-body">
+    <div class="bom-root-stats">
+      <div class="bom-stat-item">
+        <span class="bom-stat-label">Make Cost</span>
+        <span class="bom-stat-val isk">{{ isk(node.make_cost) }} ISK</span>
+      </div>
+      {% if node.buy_price > 0 %}
+      <div class="bom-stat-item">
+        <span class="bom-stat-label">Revenue</span>
+        <span class="bom-stat-val isk">{{ isk(node.total_sell_value) }} ISK</span>
+        <span class="bom-stat-sub">{{ isk(node.buy_price) }} ea</span>
+      </div>
+      <div class="bom-stat-item">
+        <span class="bom-stat-label">Est. Profit</span>
+        {% set profit = node.total_sell_value - node.make_cost %}
+        {% if profit >= 0 %}
+          <span class="bom-stat-val text-success">+{{ isk(profit) }} ISK</span>
+        {% else %}
+          <span class="bom-stat-val text-error">{{ isk(profit) }} ISK</span>
+        {% endif %}
+        <span class="bom-stat-sub">(before tax &amp; fees)</span>
+      </div>
+      {% endif %}
+      <div class="bom-stat-item">
+        <span class="bom-stat-label">Materials</span>
+        <span class="bom-stat-val">{{ node.children | length }} types</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if node.children %}
+<div class="bom-tier-label">
+  <span class="bom-tier-icon">▼</span>
+  Materials required ({{ node.children | length }} types · {{ runs }} run{{ 's' if runs != 1 }})
+</div>
+<div class="bom-mat-grid bom-grid-l1">
+  {{ loop(node.children) }}
+</div>
+{% endif %}
+
+{# ── MATERIAL CARD (depth ≥ 1) ─────────────────────────────────────────────── #}
+{% else %}
+{% set is_intermediate = node.has_blueprint and node.children %}
+{% set card_cls = 'bom-mat-card ' + ('bom-exit' if node.is_exit_point else ('bom-intermediate' if is_intermediate else ('bom-missing' if node.shortage > 0 else 'bom-leaf'))) %}
+<div class="{{ card_cls }}">
+
+  {# Card header #}
+  <div class="bom-mat-header">
+    <div style="min-width:0">
+      <div class="bom-mat-name">
+        {% if is_intermediate %}
+          {% if node.activity_label == 'Reaction' %}⚗{% else %}⚙{% endif %}
+        {% elif node.shortage > 0 %}⚠{% else %}✓{% endif %}
+        {{ node.name }}
+      </div>
+      <div class="bom-mat-qty">
+        ×{{ qty(node.quantity_needed) }}
+        {% if node.is_satisfied %}
+          <span class="text-success" style="font-size:10px">✓ have {{ qty(node.quantity_available) }}</span>
+        {% elif node.quantity_available > 0 %}
+          <span class="text-warning" style="font-size:10px">{{ qty(node.quantity_available) }}/{{ qty(node.quantity_needed) }}</span>
+          <span class="text-error" style="font-size:10px">need {{ qty(node.shortage) }} more</span>
+        {% else %}
+          <span class="text-error" style="font-size:10px">need all {{ qty(node.shortage) }}</span>
+        {% endif %}
+      </div>
+    </div>
+    {% if is_intermediate %}
+    <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end">
+      <span class="badge {% if node.is_bpo %}badge-bpo{% else %}badge-bpc{% endif %}" style="font-size:10px">
+        {{ 'BPO' if node.is_bpo else 'BPC' }}
+      </span>
+      <span class="badge badge-ok" style="font-size:10px">ME{{ node.blueprint_me }}</span>
+      {% if node.runs_needed %}
+        <span style="color:var(--text-muted); font-size:10px; white-space:nowrap">
+          {{ node.runs_needed }}r · {{ time_fmt(node.job_time_seconds) }}
+        </span>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  {# Card body — costs #}
+  <div class="bom-mat-body">
+    {% if is_intermediate %}
+      {# Make vs buy comparison #}
+      <div class="bom-cost-row">
+        <span class="bom-cost-label">Make cost</span>
+        <span class="bom-cost-val isk">{{ isk(node.make_cost) }}</span>
+      </div>
+      {% if node.sell_price > 0 %}
+      <div class="bom-cost-row">
+        <span class="bom-cost-label">Buy from market</span>
+        <span class="bom-cost-val isk text-muted">{{ isk(node.total_buy_cost) }}</span>
+      </div>
+      {% set saving = node.make_vs_buy_saving %}
+      {% if saving > 0 %}
+      <div class="bom-cost-row">
+        <span class="bom-cost-label">Saving by making</span>
+        <span class="bom-cost-val text-success">+{{ isk(saving) }}</span>
+      </div>
+      {% elif saving < 0 %}
+      <div class="bom-cost-row">
+        <span class="bom-cost-label">Cheaper to buy by</span>
+        <span class="bom-cost-val text-warning">{{ isk(-saving) }}</span>
+      </div>
+      {% endif %}
+      {% endif %}
+    {% else %}
+      {# Leaf — show unit + total price #}
+      {% if node.sell_price > 0 %}
+      <div class="bom-cost-row">
+        <span class="bom-cost-label">Buy price</span>
+        <span class="bom-cost-val isk">{{ isk(node.sell_price) }} ea</span>
+      </div>
+      <div class="bom-cost-row">
+        <span class="bom-cost-label">Total cost</span>
+        <span class="bom-cost-val isk">{{ isk(node.total_buy_cost) }}</span>
+      </div>
+      {% else %}
+      <div class="bom-cost-row">
+        <span class="bom-cost-label text-muted">No price data</span>
+      </div>
+      {% endif %}
+      {% if node.volume_each > 0 %}
+      <div class="bom-cost-row">
+        <span class="bom-cost-label">Volume</span>
+        <span class="bom-cost-val text-muted">{{ "{:,.1f}".format(node.total_volume_needed) }} m³
+          {% if node.total_volume_short > 0 %}
+            <span class="text-error">({{ "{:,.1f}".format(node.total_volume_short) }} m³ to ship)</span>
+          {% endif %}
+        </span>
+      </div>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  {# Exit point banner — sell here instead of using as a material #}
+  {% if node.is_exit_point %}
+  <div class="bom-exit-banner">
+    ⚡ <strong>Sell-here opportunity:</strong>
+    {{ isk(node.total_sell_value) }} ISK revenue
+    vs {{ isk(node.make_cost) }} ISK make cost
+    → <strong>+{{ isk(node.exit_profit) }} ISK profit</strong> if sold
+  </div>
+  {% endif %}
+
+  {# Sub-materials (recursive) #}
+  {% if node.children %}
+  <div class="bom-sub-section">
+    <div class="bom-sub-label">
+      Sub-materials · {{ node.children | length }} types
+      {% if node.runs_needed %} · {{ node.runs_needed }} run{{ 's' if node.runs_needed != 1 }}{% endif %}
+    </div>
+    <div class="bom-sub-grid">
+      {{ loop(node.children) }}
+    </div>
+  </div>
+  {% endif %}
+
+</div>{# end bom-mat-card #}
+{% endif %}
+
+{% endfor %}{# end recursive for #}
+
+{# ── Legend ──────────────────────────────────────────────────────────────── #}
+<div class="bom-legend">
+  <span class="bom-legend-item"><span class="bom-legend-dot" style="background:rgba(0,200,150,0.3);border-color:var(--success)"></span> Satisfied</span>
+  <span class="bom-legend-item"><span class="bom-legend-dot" style="background:rgba(240,180,41,0.2);border-color:var(--warning)"></span> Has blueprint (sub-manufacture)</span>
+  <span class="bom-legend-item"><span class="bom-legend-dot" style="background:rgba(224,82,96,0.2);border-color:var(--error)"></span> Missing materials</span>
+  <span class="bom-legend-item"><span class="bom-legend-dot" style="background:rgba(255,215,0,0.15);border-color:#d4a800"></span> ⚡ Profitable exit point</span>
+</div>
+
+{% elif selected_item_id %}
+<div class="card">
+  <div style="text-align:center; padding:30px; color:var(--text-muted)">
+    Blueprint not found or no product data available in SDE.
+  </div>
+</div>
+{% elif blueprints %}
+<div class="card">
+  <div style="text-align:center; padding:40px; color:var(--text-muted)">
+    <div style="font-size:32px; margin-bottom:12px">⚙</div>
+    <div style="font-size:15px; margin-bottom:6px; color:var(--text)">Select a blueprint above</div>
+    <div style="font-size:13px">Choose a blueprint or reaction to see the full material breakdown.</div>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
