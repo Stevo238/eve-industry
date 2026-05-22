@@ -274,6 +274,8 @@ async def detail_page(
             cfg = await get_settings(db)
             inbound_isk_m3  = float(cfg.get("inbound_shipping_isk_per_m3", "0") or 0)
             outbound_isk_m3 = float(cfg.get("outbound_shipping_isk_per_m3", "0") or 0)
+            sales_tax_pct   = float(cfg.get("sales_tax_pct", "2.0") or 2.0)
+            broker_fee_pct  = float(cfg.get("broker_fee_pct", "3.0") or 3.0)
 
             try:
                 tree = await build_bom_tree(
@@ -282,6 +284,8 @@ async def detail_page(
                     structure_me_bonus=structure_me / 100.0,
                     inbound_isk_per_m3=inbound_isk_m3,
                     outbound_isk_per_m3=outbound_isk_m3,
+                    sales_tax_pct=sales_tax_pct,
+                    broker_fee_pct=broker_fee_pct,
                 )
                 stats = collect_stats(tree)
                 raw_materials = collect_raw_materials(tree, inbound_isk_per_m3=inbound_isk_m3)
@@ -303,6 +307,8 @@ async def detail_page(
             "structure_me": structure_me,
             "inbound_isk_m3": inbound_isk_m3 if blueprint_item_id else 0.0,
             "outbound_isk_m3": outbound_isk_m3 if blueprint_item_id else 0.0,
+            "sales_tax_pct": sales_tax_pct if blueprint_item_id else 2.0,
+            "broker_fee_pct": broker_fee_pct if blueprint_item_id else 3.0,
             "error": error,
         },
     )

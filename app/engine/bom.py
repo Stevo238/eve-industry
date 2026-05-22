@@ -57,6 +57,9 @@ class BOMNode:
     # Shipping rates — set once at tree build time, same value on every node
     inbound_isk_per_m3: float = 0.0   # ISK/m³ to ship purchased materials in
     outbound_isk_per_m3: float = 0.0  # ISK/m³ to ship finished product out
+    # Selling fee rates — set once at tree build time, same value on every node
+    sales_tax_pct: float = 0.0        # % transaction tax when selling (e.g. 2.0)
+    broker_fee_pct: float = 0.0       # % broker fee when listing on market (e.g. 3.0)
 
     # ── Derived properties ───────────────────────────────────────────────────
 
@@ -104,8 +107,14 @@ class BOMNode:
 
     @property
     def total_sell_value(self) -> float:
-        """ISK received by selling quantity_needed to buy orders."""
+        """Gross ISK received by selling quantity_needed to buy orders (before fees)."""
         return self.quantity_needed * self.buy_price
+
+    @property
+    def net_sell_value(self) -> float:
+        """ISK received after transaction tax and broker fee (excludes outbound shipping)."""
+        fee_factor = 1.0 - (self.sales_tax_pct + self.broker_fee_pct) / 100.0
+        return self.quantity_needed * self.buy_price * fee_factor
 
     # ── Shipping ─────────────────────────────────────────────────────────────
 
@@ -168,17 +177,20 @@ class BOMNode:
     @property
     def is_exit_point(self) -> bool:
         """
-        True when selling this manufactured intermediate to buy orders yields
-        more ISK than its full make cost (materials + inbound shipping).
+        True when selling this manufactured intermediate — net of all selling
+        fees (broker, sales tax) and outbound shipping — yields more ISK than
+        its full make cost.  Uses the same fee model as the detail page so the
+        tree and the drill-down are always consistent.
         """
         if not (self.has_blueprint and self.children and self.buy_price > 0):
             return False
-        return self.total_sell_value > self.make_cost
+        net_revenue = self.net_sell_value - self.outbound_shipping_cost
+        return net_revenue > self.make_cost
 
     @property
     def exit_profit(self) -> float:
-        """Extra ISK from selling this item vs consuming it as a sub-material."""
-        return self.total_sell_value - self.make_cost
+        """Net ISK gain from selling this item (after all fees + outbound shipping) vs make cost."""
+        return (self.net_sell_value - self.outbound_shipping_cost) - self.make_cost
 
     @property
     def total_volume_needed(self) -> float:
@@ -278,8 +290,10 @@ def collect_raw_materials(root: BOMNode, inbound_isk_per_m3: float = 0.0) -> lis
         item["shortage"] = shortage
         item["is_satisfied"] = shortage <= 0
         # True cost: owned at opportunity cost (buy price), missing at acquisition cost (sell price)
-        item["cost_owned"] = owned * item["buy_price"]
-        item["cost_to_buy"] = shortage * item["sell_price"]
+        item["cost_owned"]   = owned * item["buy_price"]
+        item["owned_qty"]    = owned
+        item["owned_volume"] = owned * item["volume_each"]
+        item["cost_to_buy"]  = shortage * item["sell_price"]
         item["total_cost"] = item["cost_owned"] + item["cost_to_buy"]
         item["shortage_cost"] = shortage * item["sell_price"]   # what you still need to spend
         item["total_volume"] = qty * item["volume_each"]
@@ -360,6 +374,8 @@ async def build_bom_tree(
     structure_me_bonus: float = 0.0,
     inbound_isk_per_m3: float = 0.0,
     outbound_isk_per_m3: float = 0.0,
+    sales_tax_pct: float = 0.0,
+    broker_fee_pct: float = 0.0,
     depth: int = 0,
 ) -> BOMNode:
     """Recursively build the BOM tree for the given item and quantity."""
@@ -383,6 +399,8 @@ async def build_bom_tree(
         volume_each=volume,
         inbound_isk_per_m3=inbound_isk_per_m3,
         outbound_isk_per_m3=outbound_isk_per_m3,
+        sales_tax_pct=sales_tax_pct,
+        broker_fee_pct=broker_fee_pct,
     )
 
     if depth >= MAX_DEPTH or type_id in visited:
@@ -456,6 +474,8 @@ async def build_bom_tree(
             structure_me_bonus=structure_me_bonus,
             inbound_isk_per_m3=inbound_isk_per_m3,
             outbound_isk_per_m3=outbound_isk_per_m3,
+            sales_tax_pct=sales_tax_pct,
+            broker_fee_pct=broker_fee_pct,
             depth=depth + 1,
         )
         node.children.append(child)

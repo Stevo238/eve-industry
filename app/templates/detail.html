@@ -58,67 +58,158 @@
 
 {% if tree %}
 
-{# ── Summary stats strip ───────────────────────────────────────────────────── #}
-<div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); margin-bottom:16px">
-  <div class="stat-card">
-    <div class="stat-label">Make Cost</div>
-    <div class="stat-value" style="font-size:18px; color:var(--warning)">{{ isk(stats.total_make_cost) }}</div>
-    <div class="stat-sub">ISK total</div>
+{# ── Financial summary document ────────────────────────────────────────────── #}
+<div class="fin-doc">
+
+  {# Header: product identity + run metadata #}
+  <div class="fin-doc-header">
+    <div>
+      <div class="fin-doc-eyebrow">Manufacturing Analysis</div>
+      <div class="fin-doc-title">{{ selected_prod_name }}</div>
+    </div>
+    <div class="fin-doc-meta">
+      <span>{{ runs }} run{{ 's' if runs != 1 }} · ×{{ qty(tree.quantity_needed) }} units</span>
+      {% if structure_me > 0 %}<span>Structure ME {{ structure_me }}%</span>{% endif %}
+      <span>⏱ {{ time_fmt(stats.total_job_time) }} total</span>
+      <span>{{ stats.intermediate_count }} sub-job{{ 's' if stats.intermediate_count != 1 }}</span>
+    </div>
   </div>
-  {% if stats.revenue > 0 %}
-  <div class="stat-card">
-    <div class="stat-label">Revenue</div>
-    <div class="stat-value" style="font-size:18px; color:var(--accent)">{{ isk(stats.revenue) }}</div>
-    <div class="stat-sub">sell to buy orders</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-label">Est. Profit</div>
-    {% if stats.net_profit >= 0 %}
-    <div class="stat-value" style="font-size:18px; color:var(--success)">+{{ isk(stats.net_profit) }}</div>
-    {% else %}
-    <div class="stat-value" style="font-size:18px; color:var(--error)">{{ isk(stats.net_profit) }}</div>
+
+  {# P&L body #}
+  <div class="fin-doc-body">
+
+    {# ── REVENUE ── #}
+    {% if stats.revenue > 0 %}
+    <div class="fin-section">Revenue</div>
+    <div class="fin-line">
+      <span class="fin-line-label">Sell value ×{{ qty(tree.quantity_needed) }} (buy orders)</span>
+      <span class="fin-amount" style="color:var(--accent)">{{ isk(stats.revenue) }} ISK</span>
+    </div>
     {% endif %}
-    <div class="stat-sub">after shipping, before tax</div>
-  </div>
-  {% endif %}
-  {% if stats.total_inbound_shipping > 0 or stats.outbound_shipping > 0 %}
-  <div class="stat-card" style="border-color:var(--text-muted)">
-    <div class="stat-label">Shipping</div>
-    <div class="stat-value" style="font-size:18px; color:var(--text-muted)">
-      {{ isk(stats.total_inbound_shipping + stats.outbound_shipping) }}
+
+    {# ── COST OF GOODS ── #}
+    <div class="fin-section">Cost of Goods</div>
+    {# Gross opportunity cost of owned materials #}
+    {% set owned_gross     = raw_materials | sum(attribute='cost_owned') %}
+    {% set buy_total       = raw_materials | sum(attribute='shortage_cost') %}
+    {# Deductions to arrive at NET opportunity cost:
+       owned materials are only worth what you'd actually receive after
+       shipping them to market and paying transaction tax on the sale #}
+    {% set owned_vol_total = raw_materials | sum(attribute='owned_volume') %}
+    {% set owned_ship_out  = owned_vol_total * outbound_isk_m3 %}
+    {% set owned_tax_cost  = owned_gross * sales_tax_pct / 100 %}
+    {% set owned_net_raw   = owned_gross - owned_ship_out - owned_tax_cost %}
+    {% set owned_net       = owned_net_raw if owned_net_raw > 0 else 0 %}
+    {# True COGS uses the adjusted opportunity cost #}
+    {% set true_cogs       = owned_net + buy_total + stats.total_inbound_shipping %}
+
+    {% if owned_gross > 0 %}
+    <div class="fin-line">
+      <span class="fin-line-label">
+        Have — net opportunity cost
+        {% if owned_ship_out > 0 or owned_tax_cost > 0 %}
+        <span class="fin-calc-bubble">
+          {{ isk(owned_gross) }}
+          {% if owned_ship_out > 0 %} − {{ isk(owned_ship_out) }} ship{% endif %}
+          {% if owned_tax_cost > 0 %} − {{ isk(owned_tax_cost) }} tax{% endif %}
+        </span>
+        {% endif %}
+      </span>
+      <span class="fin-amount text-muted">{{ isk(owned_net) }} ISK</span>
     </div>
-    <div class="stat-sub">
-      {% if stats.total_inbound_shipping > 0 %}↓ {{ isk(stats.total_inbound_shipping) }} in{% endif %}
-      {% if stats.outbound_shipping > 0 %} ↑ {{ isk(stats.outbound_shipping) }} out{% endif %}
+    {% endif %}
+    {% if buy_total > 0 %}
+    <div class="fin-line">
+      <span class="fin-line-label">To buy at market</span>
+      <span class="fin-amount text-error">{{ isk(buy_total) }} ISK</span>
     </div>
-  </div>
-  {% endif %}
-  <div class="stat-card">
-    <div class="stat-label">Job Time</div>
-    <div class="stat-value" style="font-size:18px">{{ time_fmt(stats.total_job_time) }}</div>
-    <div class="stat-sub">all steps</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-label">Sub-jobs</div>
-    <div class="stat-value" style="font-size:18px">{{ stats.intermediate_count }}</div>
-    <div class="stat-sub">intermediate</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-label">Raw Types</div>
-    <div class="stat-value" style="font-size:18px">{{ raw_materials | length }}</div>
-    <div class="stat-sub">
-      {% set missing = raw_materials | selectattr('is_satisfied', 'equalto', false) | list | length %}
-      {% if missing > 0 %}<span class="text-error">{{ missing }} missing</span>
-      {% else %}all available{% endif %}
+    {% endif %}
+    {% if stats.total_inbound_shipping > 0 %}
+    <div class="fin-line">
+      <span class="fin-line-label">Inbound shipping</span>
+      <span class="fin-amount text-muted">{{ isk(stats.total_inbound_shipping) }} ISK</span>
     </div>
+    {% endif %}
+    <div class="fin-rule"></div>
+    <div class="fin-line fin-line--total">
+      <span class="fin-line-label">Total COGS</span>
+      <span class="fin-amount" style="color:var(--warning)">{{ isk(true_cogs) }} ISK</span>
+    </div>
+
+    {# ── GROSS PROFIT → SELLING FEES → NET PROFIT ── #}
+    {% if stats.revenue > 0 %}
+    {% set gross_profit    = stats.revenue - true_cogs %}
+    {% set broker_fee_cost = stats.revenue * broker_fee_pct / 100 %}
+    {% set sales_tax_cost  = stats.revenue * sales_tax_pct / 100 %}
+    {% set total_fees      = stats.outbound_shipping + broker_fee_cost + sales_tax_cost %}
+    {% set net_profit      = gross_profit - total_fees %}
+
+    <div class="fin-rule fin-rule--double"></div>
+    <div class="fin-line fin-line--total">
+      <span class="fin-line-label">Gross Profit</span>
+      <span class="fin-amount {% if gross_profit >= 0 %}text-success{% else %}text-error{% endif %}">
+        {{ "{:+,.0f}".format(gross_profit) }} ISK
+      </span>
+    </div>
+
+    {# ── SELLING FEES ── #}
+    <div class="fin-section">Selling Fees</div>
+    {% if stats.outbound_shipping > 0 %}
+    <div class="fin-line">
+      <span class="fin-line-label">Outbound shipping</span>
+      <span class="fin-amount text-muted">{{ isk(stats.outbound_shipping) }} ISK</span>
+    </div>
+    {% endif %}
+    {% if broker_fee_pct > 0 %}
+    <div class="fin-line">
+      <span class="fin-line-label">Broker fee ({{ broker_fee_pct }}%)</span>
+      <span class="fin-amount text-muted">{{ isk(broker_fee_cost) }} ISK</span>
+    </div>
+    {% endif %}
+    {% if sales_tax_pct > 0 %}
+    <div class="fin-line">
+      <span class="fin-line-label">Sales tax ({{ sales_tax_pct }}%)</span>
+      <span class="fin-amount text-muted">{{ isk(sales_tax_cost) }} ISK</span>
+    </div>
+    {% endif %}
+    {% if total_fees > 0 %}
+    <div class="fin-rule"></div>
+    <div class="fin-line fin-line--total">
+      <span class="fin-line-label">Total selling fees</span>
+      <span class="fin-amount text-muted">{{ isk(total_fees) }} ISK</span>
+    </div>
+    {% endif %}
+
+    {# ── NET PROFIT ── #}
+    <div class="fin-rule fin-rule--double"></div>
+    <div class="fin-line fin-line--result">
+      <span class="fin-line-label">Net Profit</span>
+      {% if net_profit >= 0 %}
+      <span class="fin-amount text-success">+{{ isk(net_profit) }} ISK</span>
+      {% else %}
+      <span class="fin-amount text-error">{{ isk(net_profit) }} ISK</span>
+      {% endif %}
+    </div>
+    {% set margin = (net_profit / stats.revenue * 100) %}
+    <div class="fin-line fin-line--sub">
+      <span class="fin-line-label">Profit margin</span>
+      <span class="fin-amount {% if margin >= 0 %}text-success{% else %}text-error{% endif %}">{{ "{:+.1f}".format(margin) }}%</span>
+    </div>
+    {% endif %}
+
   </div>
-  {% if stats.exit_point_count > 0 %}
-  <div class="stat-card" style="border-color:#d4a800">
-    <div class="stat-label" style="color:#d4a800">Exit Points</div>
-    <div class="stat-value" style="font-size:18px; color:#ffd700">{{ stats.exit_point_count }}</div>
-    <div class="stat-sub" style="color:#d4a800">sell-here opps</div>
+
+  {# Footer: operational metadata #}
+  <div class="fin-doc-footer">
+    {% set missing = raw_materials | selectattr('is_satisfied', 'equalto', false) | list | length %}
+    <span>{{ raw_materials | length }} raw material type{{ 's' if (raw_materials | length) != 1 }}
+      {% if missing > 0 %} · <span class="text-error">{{ missing }} to buy</span>{% else %} · <span class="text-success">all in stock</span>{% endif %}
+    </span>
+    {% if stats.exit_point_count > 0 %}
+    <span style="color:#d4a800">⚡ {{ stats.exit_point_count }} profitable exit point{{ 's' if stats.exit_point_count != 1 }}</span>
+    {% endif %}
   </div>
-  {% endif %}
+
 </div>
 
 {# ═══════════════════════════════════════════════════════════════════════════
@@ -342,7 +433,10 @@
     </div>
     {% if is_intermediate %}
     <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end; flex-shrink:0">
-      <span class="badge {% if node.is_bpo %}badge-bpo{% else %}badge-bpc{% endif %}" style="font-size:10px">{{ 'BPO' if node.is_bpo else 'BPC' }}</span>
+      <a href="/industry/detail?blueprint_item_id={{ node.blueprint_item_id }}&runs={{ node.runs_needed if node.runs_needed else 1 }}&structure_me={{ structure_me }}"
+         class="badge {% if node.is_bpo %}badge-bpo{% else %}badge-bpc{% endif %}"
+         style="font-size:10px; text-decoration:none; cursor:pointer"
+         title="Drill into {{ node.name }}">{{ 'BPO' if node.is_bpo else 'BPC' }}</a>
       <span class="badge badge-ok" style="font-size:10px">ME{{ node.blueprint_me }}</span>
       {% if node.runs_needed %}
         <span style="color:var(--text-muted); font-size:10px; white-space:nowrap">{{ node.runs_needed }}r · {{ time_fmt(node.job_time_seconds) }}</span>
@@ -418,7 +512,7 @@
   {# Exit point banner #}
   {% if node.is_exit_point %}
   <div class="bom-exit-banner">
-    ⚡ <strong>Sell here:</strong> {{ isk(node.total_sell_value) }} ISK revenue vs {{ isk(node.make_cost) }} ISK cost → <strong>+{{ isk(node.exit_profit) }} ISK</strong>
+    ⚡ <strong>Sell here:</strong> {{ isk(node.net_sell_value) }} ISK net (after fees) vs {{ isk(node.make_cost) }} ISK cost → <strong>+{{ isk(node.exit_profit) }} ISK</strong>
   </div>
   {% endif %}
 
