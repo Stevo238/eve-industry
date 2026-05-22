@@ -141,9 +141,7 @@
           </tr>
         </thead>
         <tbody>
-          {% set total_buy = namespace(val=0) %}
           {% for m in raw_materials %}
-          {% set _ = total_buy.__setattr__('val', total_buy.val + m.shortage_cost) %}
           <tr class="{% if not m.is_satisfied %}row-unprofitable{% endif %}">
             <td>
               <span style="font-weight:500">{{ m.name }}</span>
