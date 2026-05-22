@@ -48,29 +48,19 @@
       Market Fees
     </h3>
     <p style="font-size:13px; color:var(--text-muted); margin:0 0 16px">
-      Applied against sell-order revenue when calculating net profit.
-      Default values assume reasonable skill levels.
+      Profitability assumes instant transactions: materials bought from sell orders,
+      finished goods sold to buy orders. No broker fee is charged (no sell order placed).
     </p>
 
     <div style="display:grid; gap:16px">
       <div class="form-row">
         <label class="form-label">
           Sales tax (%)
-          <span class="form-hint">Typical: 1.8% with Accounting V, up to 8% for Alpha</span>
+          <span class="form-hint">Applied when selling product to buy orders. Typical: 1.8% (Accounting V), 2.0% (IV), up to 8% Alpha</span>
         </label>
         <input type="number" name="sales_tax_pct"
                value="{{ settings.sales_tax_pct }}"
                min="0" max="20" step="0.1" class="form-input">
-      </div>
-
-      <div class="form-row">
-        <label class="form-label">
-          Broker fee (%)
-          <span class="form-hint">Typically 2–4% depending on standings and skills</span>
-        </label>
-        <input type="number" name="broker_fee_pct"
-               value="{{ settings.broker_fee_pct }}"
-               min="0" max="10" step="0.1" class="form-input">
       </div>
     </div>
 

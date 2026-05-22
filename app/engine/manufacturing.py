@@ -115,23 +115,30 @@ class ManufacturingOption:
 
     @property
     def total_cost(self) -> float:
+        # broker_fee is always 0 for instant-sale-to-buy-order transactions
         return (
             self.total_material_cost
             + self.inbound_shipping_cost
             + self.outbound_shipping_cost
             + self.manufacturing_fee
             + self.sales_tax
-            + self.broker_fee
         )
 
     @property
     def gross_revenue(self) -> float:
-        """Revenue from listing finished product on market."""
-        return self.product_sell_price * self.qty_produced
+        """
+        Revenue from selling finished product to buy orders immediately.
+        Uses buy_price — the highest standing buy order in Jita.
+        """
+        return self.product_buy_price * self.qty_produced
 
     @property
     def net_profit_manufacture(self) -> float:
-        """Net profit from manufacturing and selling via market order."""
+        """
+        Net profit: sell product to buy orders, having bought materials from
+        sell orders (or valued owned materials at buy-order opportunity cost).
+        Broker fee is 0 — no sell order is placed.
+        """
         return self.gross_revenue - self.total_cost
 
     @property
@@ -140,16 +147,28 @@ class ManufacturingOption:
         return sum(m.sell_value for m in self.materials)
 
     @property
+    def sell_materials_net(self) -> float:
+        """sell_materials_value after sales tax (tax applies to all transactions)."""
+        return self.sell_materials_value * (1.0 - self._sales_tax_rate)
+
+    @property
+    def _sales_tax_rate(self) -> float:
+        """Derive rate from the stored sales_tax amount and gross revenue, fallback 0."""
+        if self.gross_revenue > 0:
+            return self.sales_tax / self.gross_revenue
+        return 0.0
+
+    @property
     def profit_delta(self) -> float:
         """
-        How much MORE (or less) you make by manufacturing vs selling materials.
-        Positive = manufacture is better.
+        How much MORE you make by manufacturing vs just selling the raw materials.
+        Positive = manufacturing is better.
         """
-        return self.net_profit_manufacture - self.sell_materials_value
+        return self.net_profit_manufacture - self.sell_materials_net
 
     @property
     def recommendation(self) -> str:
-        if not self.product_sell_price:
+        if not self.product_buy_price:
             return "no_price"
         if self.profit_delta > 0:
             return "manufacture"
@@ -358,10 +377,11 @@ async def analyse_blueprint(
     outbound_volume = prod_volume * qty_produced
     outbound_shipping = outbound_volume * outbound_isk_per_m3
 
-    # Market fees (applied against sell order revenue)
-    gross = product_sell_price * qty_produced
+    # Sales tax applies when selling to buy orders (instant sale, no listing).
+    # Broker fee is 0 — we are NOT placing a sell order.
+    gross = product_buy_price * qty_produced
     sales_tax = gross * (sales_tax_pct / 100.0)
-    broker_fee = gross * (broker_fee_pct / 100.0)
+    broker_fee = 0.0  # no order listing
 
     # Industry job cost: cost_index * sum(adjusted_price * qty)
     # We use a placeholder cost_index; a real implementation would look up the

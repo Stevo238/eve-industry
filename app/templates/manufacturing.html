@@ -77,7 +77,7 @@
           <th>Status</th>
           <th class="td-right">Mat. Cost</th>
           <th class="td-right">Sell Mats</th>
-          <th class="td-right">Product Price</th>
+          <th class="td-right">Revenue (buy order)</th>
           <th class="td-right">Net Profit</th>
           <th class="td-right">vs Sell Mats</th>
           <th>Verdict</th>
@@ -138,12 +138,12 @@
             {% else %}<span class="text-muted">—</span>{% endif %}
           </td>
 
-          {# Product sell price (best Jita sell order × qty) #}
+          {# Revenue: product sold to best Jita buy order #}
           <td class="td-right">
             {% if has_prices %}
               <span class="isk">{{ "{:,.0f}".format(opt.gross_revenue) }}</span>
               <div style="font-size:10px; color:var(--text-muted)">
-                {{ "{:,.0f}".format(opt.product_sell_price) }} ea
+                {{ "{:,.0f}".format(opt.product_buy_price) }} ea
               </div>
             {% else %}<span class="text-muted">—</span>{% endif %}
           </td>
@@ -156,13 +156,13 @@
               {% else %}
                 <span class="text-error isk">{{ "{:,.0f}".format(opt.net_profit_manufacture) }}</span>
               {% endif %}
-              <div style="font-size:10px; color:var(--text-muted)" title="Fees: tax {{ '{:,.0f}'.format(opt.sales_tax) }}, broker {{ '{:,.0f}'.format(opt.broker_fee) }}, mfg {{ '{:,.0f}'.format(opt.manufacturing_fee) }}{% if opt.inbound_shipping_cost %}, ship-in {{ '{:,.0f}'.format(opt.inbound_shipping_cost) }}{% endif %}{% if opt.outbound_shipping_cost %}, ship-out {{ '{:,.0f}'.format(opt.outbound_shipping_cost) }}{% endif %}">
-                fees: {{ "{:,.0f}".format(opt.sales_tax + opt.broker_fee + opt.manufacturing_fee + opt.inbound_shipping_cost + opt.outbound_shipping_cost) }}
+              <div style="font-size:10px; color:var(--text-muted)" title="tax {{ '{:,.0f}'.format(opt.sales_tax) }}, mfg fee {{ '{:,.0f}'.format(opt.manufacturing_fee) }}{% if opt.inbound_shipping_cost %}, ship-in {{ '{:,.0f}'.format(opt.inbound_shipping_cost) }}{% endif %}{% if opt.outbound_shipping_cost %}, ship-out {{ '{:,.0f}'.format(opt.outbound_shipping_cost) }}{% endif %}">
+                costs: {{ "{:,.0f}".format(opt.sales_tax + opt.manufacturing_fee + opt.inbound_shipping_cost + opt.outbound_shipping_cost) }}
               </div>
             {% else %}<span class="text-muted">—</span>{% endif %}
           </td>
 
-          {# Delta vs selling materials #}
+          {# Delta: manufacture net profit vs selling raw materials to buy orders #}
           <td class="td-right">
             {% if has_prices %}
               {% if opt.profit_delta >= 0 %}
@@ -170,6 +170,9 @@
               {% else %}
                 <span class="text-error isk">{{ "{:,.0f}".format(opt.profit_delta) }}</span>
               {% endif %}
+              <div style="font-size:10px; color:var(--text-muted)">
+                mats: {{ "{:,.0f}".format(opt.sell_materials_net) }}
+              </div>
             {% else %}<span class="text-muted">—</span>{% endif %}
           </td>
 
@@ -199,10 +202,10 @@
 </div>
 
 <div style="margin-top:12px; font-size:11px; color:var(--text-muted); line-height:1.8">
-  <strong>Pricing notes:</strong>
-  Mat. Cost = owned materials at Jita buy-order price (opportunity cost) + missing materials at Jita sell-order price (acquisition cost) ·
-  Net Profit = Revenue − material cost − shipping − sales tax − broker fee − mfg fee ·
-  vs Sell Mats = Net Profit minus the value of selling all input materials to buy orders
+  <strong>Pricing model:</strong>
+  Buy materials from sell orders (sell price) · Sell product to buy orders (buy price) · No broker fee (no listing placed) ·
+  Owned materials valued at buy-order price (opportunity cost of not selling them) ·
+  "vs Sell Mats" = manufacture net profit minus what you'd get selling all input materials to buy orders (after tax)
 </div>
 
 {% elif sde_available and characters %}

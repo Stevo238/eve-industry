@@ -305,37 +305,61 @@ async def sync_market_prices(db: AsyncSession) -> int:
 
 async def sync_blueprint_market_prices(db: AsyncSession) -> int:
     """
-    Fetch best Jita buy and sell prices for every type_id referenced in
-    blueprint materials and products.  Updates buy_price / sell_price on
-    existing MarketPrice rows (or inserts stub rows if none exist).
+    Fetch best Jita buy and sell prices for types used by the user's own
+    blueprints (materials + products only — not the entire SDE).
 
-    Uses The Forge region (10000002).  Fetches per-type concurrently in
-    batches of 20 to stay polite to ESI.
+    Uses The Forge region (10000002).  Concurrent batches of 20 per-type
+    requests so the whole fetch completes in seconds, not minutes.
     """
     import asyncio
     import httpx
 
+    from app.models.blueprints import Blueprint
     from app.models.market import MarketPrice
     from app.models.sde import SdeBlueprintMaterial, SdeBlueprintProduct
     from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
     REGION_ID = 10000002  # The Forge (Jita)
+    ACTIVITY_MFG = 1
+
+    # ── Scope to blueprints the user actually owns ────────────────────────
+    user_bp_type_ids = [
+        r[0]
+        for r in (await db.execute(select(Blueprint.type_id).distinct())).fetchall()
+    ]
+    if not user_bp_type_ids:
+        print("[PRICE] No blueprints found in DB — nothing to fetch")
+        return 0
+
+    print(f"[PRICE] User owns {len(user_bp_type_ids)} blueprint types")
 
     mat_ids = {
         r[0]
         for r in (
-            await db.execute(select(SdeBlueprintMaterial.material_type_id).distinct())
+            await db.execute(
+                select(SdeBlueprintMaterial.material_type_id)
+                .where(SdeBlueprintMaterial.blueprint_type_id.in_(user_bp_type_ids))
+                .where(SdeBlueprintMaterial.activity_id == ACTIVITY_MFG)
+                .distinct()
+            )
         ).fetchall()
     }
     prod_ids = {
         r[0]
         for r in (
-            await db.execute(select(SdeBlueprintProduct.product_type_id).distinct())
+            await db.execute(
+                select(SdeBlueprintProduct.product_type_id)
+                .where(SdeBlueprintProduct.blueprint_type_id.in_(user_bp_type_ids))
+                .where(SdeBlueprintProduct.activity_id == ACTIVITY_MFG)
+                .distinct()
+            )
         ).fetchall()
     }
     type_ids = list(mat_ids | prod_ids)
+    print(f"[PRICE] Fetching prices for {len(type_ids)} types ({len(mat_ids)} mats, {len(prod_ids)} products)")
 
     if not type_ids:
+        print("[PRICE] No material/product types found in SDE for user blueprints")
         return 0
 
     best_prices: dict[int, dict] = {}
@@ -352,20 +376,23 @@ async def sync_blueprint_market_prices(db: AsyncSession) -> int:
                 if resp.status_code == 200:
                     orders = resp.json()
                     if orders:
-                        if order_type == "sell":
-                            price = min(o["price"] for o in orders)
-                        else:
-                            price = max(o["price"] for o in orders)
+                        price = (
+                            min(o["price"] for o in orders)
+                            if order_type == "sell"
+                            else max(o["price"] for o in orders)
+                        )
                         best_prices.setdefault(type_id, {})[key] = price
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"[PRICE] fetch_type {type_id} {order_type} error: {exc}")
 
     async with httpx.AsyncClient() as client:
-        # Process in batches of 20 concurrent requests
         for i in range(0, len(type_ids), 20):
             batch = type_ids[i : i + 20]
             await asyncio.gather(*[fetch_type(client, tid) for tid in batch])
+            if i % 100 == 0 and i > 0:
+                print(f"[PRICE] Progress: {i}/{len(type_ids)} types processed")
 
+    print(f"[PRICE] Got prices for {len(best_prices)} types, saving to DB…")
     if not best_prices:
         return 0
 
@@ -391,6 +418,7 @@ async def sync_blueprint_market_prices(db: AsyncSession) -> int:
         await db.execute(stmt)
 
     await db.commit()
+    print(f"[PRICE] Done — saved {len(best_prices)} prices")
     return len(best_prices)
 
 
