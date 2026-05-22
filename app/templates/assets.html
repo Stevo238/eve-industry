@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Assets — EVE Industry{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Assets</div>
+    <div class="page-sub">{{ total_items }} item types · {{ "{:,}".format(total_quantity) }} total units</div>
+  </div>
+</div>
+
+<form method="get" action="/assets">
+  <div class="filter-bar">
+    <select name="character_id" onchange="this.form.submit()">
+      <option value="">All Characters</option>
+      {% for char in characters %}
+        <option value="{{ char.character_id }}" {% if selected_char == char.character_id %}selected{% endif %}>
+          {{ char.name }}
+        </option>
+      {% endfor %}
+    </select>
+    <input type="text" name="search" value="{{ search }}" placeholder="Search item name…" style="width:220px">
+    {% if selected_char %}<input type="hidden" name="character_id" value="{{ selected_char }}">{% endif %}
+    <button type="submit" class="btn btn-ghost">Search</button>
+    {% if search or selected_char %}
+      <a href="/assets" class="btn btn-ghost">✕ Clear</a>
+    {% endif %}
+  </div>
+</form>
+
+<div class="card" style="padding:0">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th>Character</th>
+          <th class="td-right">Qty</th>
+          <th>Location</th>
+          <th>Flag</th>
+          <th>Type</th>
+          <th class="td-right">Vol (m³)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in assets %}
+        <tr>
+          <td>{{ row.type_name or row.type_id }}</td>
+          <td class="text-muted" style="font-size:12px">{{ char_map.get(row.character_id, row.character_id) }}</td>
+          <td class="td-right">{{ "{:,}".format(row.quantity) }}</td>
+          <td>
+            {% if row.location_name %}
+              <span title="{{ row.location_id }}">
+                {% if row.loc_type == 'station' %}🏭
+                {% elif row.loc_type == 'structure' %}🔷
+                {% elif row.loc_type == 'solar_system' %}☀
+                {% elif row.loc_type == 'in_item' %}🚀
+                {% endif %}
+                {{ row.location_name }}
+              </span>
+            {% else %}
+              <span class="td-mono text-muted">{{ row.location_id }}</span>
+            {% endif %}
+          </td>
+          <td><span class="text-muted" style="font-size:12px">{{ row.location_flag }}</span></td>
+          <td>
+            {% if row.is_blueprint_copy is not none %}
+              {% if row.is_blueprint_copy %}
+                <span class="badge badge-bpc">BPC</span>
+              {% else %}
+                <span class="badge badge-bpo">BPO</span>
+              {% endif %}
+            {% endif %}
+          </td>
+          <td class="td-right text-muted">
+            {% if row.volume %}{{ "{:,.2f}".format(row.volume * row.quantity) }}{% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" style="text-align:center; padding:30px; color:var(--text-muted)">
+          No assets found. Sync your characters first.
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

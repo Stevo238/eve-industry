@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}EVE Industry Manager{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
+</head>
+<body>
+  <nav class="sidebar">
+    <div class="logo">
+      <span class="logo-icon">⚙</span>
+      <span class="logo-text">EVE Industry</span>
+    </div>
+    <ul class="nav-links">
+      <li><a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">
+        <span class="nav-icon">◈</span> Dashboard
+      </a></li>
+      <li><a href="/characters" class="nav-link {% if '/characters' in request.url.path %}active{% endif %}">
+        <span class="nav-icon">◉</span> Characters
+      </a></li>
+      <li><a href="/assets" class="nav-link {% if '/assets' in request.url.path %}active{% endif %}">
+        <span class="nav-icon">◫</span> Assets
+      </a></li>
+      <li><a href="/blueprints" class="nav-link {% if '/blueprints' in request.url.path %}active{% endif %}">
+        <span class="nav-icon">◧</span> Blueprints
+      </a></li>
+      <li class="nav-section">Industry</li>
+      <li><a href="/industry/jobs" class="nav-link {% if 'industry/jobs' in request.url.path %}active{% endif %}">
+        <span class="nav-icon">⚒</span> Jobs
+      </a></li>
+      <li><a href="/industry/manufacturing" class="nav-link {% if 'manufacturing' in request.url.path %}active{% endif %}">
+        <span class="nav-icon">⚙</span> Manufacturing
+      </a></li>
+      <li class="nav-section">Data</li>
+      <li><a href="/market" class="nav-link {% if '/market' in request.url.path %}active{% endif %}">
+        <span class="nav-icon">◈</span> Market
+      </a></li>
+      <li><a href="/sde" class="nav-link {% if '/sde' in request.url.path %}active{% endif %}">
+        <span class="nav-icon">◌</span> SDE Import
+      </a></li>
+    </ul>
+    <div class="sidebar-footer">
+      <a href="/auth/login" class="btn btn-sm btn-outline">+ Add Character</a>
+    </div>
+  </nav>
+
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

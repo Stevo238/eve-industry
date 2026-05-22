@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Market — EVE Industry{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Market</div>
+    <div class="page-sub">Jita price lookup · Character orders</div>
+  </div>
+  <form method="post" action="/market/sync-prices"
+        hx-post="/market/sync-prices" hx-target="#sync-msg" hx-swap="innerHTML">
+    <button type="submit" class="btn btn-outline">↻ Sync Market Prices</button>
+  </form>
+</div>
+
+<div id="sync-msg"></div>
+
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Item Price Lookup (Jita)</span>
+  </div>
+  <form method="get" action="/market">
+    <div class="filter-bar">
+      <input type="text" name="search" value="{{ search }}" placeholder="Search item name…" style="width:280px">
+      <button type="submit" class="btn btn-primary">Search</button>
+    </div>
+  </form>
+
+  {% if price_rows %}
+  <div class="table-wrap mt-16">
+    <table>
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th class="td-right">Adjusted Price</th>
+          <th class="td-right">Average Price</th>
+          <th>Live Orders</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in price_rows %}
+        <tr>
+          <td>{{ row.name }}</td>
+          <td class="td-right isk">
+            {% if row.adjusted_price %}{{ "{:,.2f}".format(row.adjusted_price) }}{% else %}—{% endif %}
+          </td>
+          <td class="td-right isk">
+            {% if row.average_price %}{{ "{:,.2f}".format(row.average_price) }}{% else %}—{% endif %}
+          </td>
+          <td>
+            <button class="btn btn-sm btn-ghost"
+                    hx-get="/market/orders/{{ row.type_id }}"
+                    hx-target="#orders-{{ row.type_id }}"
+                    hx-swap="innerHTML">
+              Fetch Jita Orders
+            </button>
+            <div id="orders-{{ row.type_id }}"></div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% elif search %}
+  <div class="alert alert-info mt-16">No items found matching "{{ search }}".</div>
+  {% endif %}
+</div>
+
+{% if char_orders %}
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Your Active Orders</span>
+    <span class="text-muted" style="font-size:12px">{{ char_orders | length }} orders</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Character</th>
+          <th>Item</th>
+          <th>Type</th>
+          <th class="td-right">Price</th>
+          <th class="td-right">Vol Remain</th>
+          <th class="td-right">Vol Total</th>
+          <th>State</th>
+          <th>Issued</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for order in char_orders %}
+        <tr>
+          <td class="text-muted">{{ char_map.get(order.character_id, order.character_id) }}</td>
+          <td>{{ order.type_id }}</td>
+          <td>
+            {% if order.is_buy_order %}
+              <span class="badge badge-warn">Buy</span>
+            {% else %}
+              <span class="badge badge-ok">Sell</span>
+            {% endif %}
+          </td>
+          <td class="td-right isk">{{ "{:,.2f}".format(order.price) }}</td>
+          <td class="td-right">{{ "{:,}".format(order.volume_remain) }}</td>
+          <td class="td-right text-muted">{{ "{:,}".format(order.volume_total) }}</td>
+          <td>
+            {% if order.state == 'active' %}
+              <span class="badge badge-active">Active</span>
+            {% else %}
+              <span class="badge">{{ order.state }}</span>
+            {% endif %}
+          </td>
+          <td class="text-muted" style="font-size:12px">{{ order.issued.strftime('%Y-%m-%d') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

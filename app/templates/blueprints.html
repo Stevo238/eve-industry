@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Blueprints — EVE Industry{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Blueprints</div>
+    <div class="page-sub">{{ total }} blueprint(s) across all characters</div>
+  </div>
+</div>
+
+<form method="get" action="/blueprints">
+  <div class="filter-bar">
+    <select name="character_id" onchange="this.form.submit()">
+      <option value="">All Characters</option>
+      {% for char in characters %}
+        <option value="{{ char.character_id }}" {% if selected_char == char.character_id %}selected{% endif %}>
+          {{ char.name }}
+        </option>
+      {% endfor %}
+    </select>
+    <input type="text" name="search" value="{{ search }}" placeholder="Search blueprint…" style="width:220px">
+    <select name="show">
+      <option value="all"  {% if show == 'all'  %}selected{% endif %}>BPO + BPC</option>
+      <option value="bpo"  {% if show == 'bpo'  %}selected{% endif %}>BPO only</option>
+      <option value="bpc"  {% if show == 'bpc'  %}selected{% endif %}>BPC only</option>
+    </select>
+    <button type="submit" class="btn btn-ghost">Filter</button>
+    {% if search or selected_char or show != 'all' %}
+      <a href="/blueprints" class="btn btn-ghost">✕ Clear</a>
+    {% endif %}
+  </div>
+</form>
+
+<div class="card" style="padding:0">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Blueprint</th>
+          <th>Character</th>
+          <th>Type</th>
+          <th style="text-align:center">ME</th>
+          <th style="text-align:center">TE</th>
+          <th style="text-align:center">Runs</th>
+          <th>Location Flag</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for bp in blueprints %}
+        <tr>
+          <td>{{ bp.type_name or bp.type_id }}</td>
+          <td class="text-muted">{{ char_map.get(bp.character_id, bp.character_id) }}</td>
+          <td>
+            {% if bp.runs == -1 %}
+              <span class="badge badge-bpo">BPO</span>
+            {% else %}
+              <span class="badge badge-bpc">BPC</span>
+            {% endif %}
+          </td>
+          <td style="text-align:center">
+            <span class="me-label">ME{{ bp.material_efficiency }}</span>
+          </td>
+          <td style="text-align:center">
+            <span class="te-label">TE{{ bp.time_efficiency }}</span>
+          </td>
+          <td style="text-align:center">
+            {% if bp.runs == -1 %}
+              <span class="text-muted">∞</span>
+            {% else %}
+              {{ "{:,}".format(bp.runs) }}
+            {% endif %}
+          </td>
+          <td class="text-muted">{{ bp.location_flag }}</td>
+          <td>
+            <a href="/industry/manufacturing?character_id={{ bp.character_id }}"
+               class="btn btn-sm btn-ghost">Analyse</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" style="text-align:center; padding:30px; color:var(--text-muted)">
+          No blueprints found. Sync your characters first.
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Characters — EVE Industry{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Characters</div>
+    <div class="page-sub">Manage connected EVE accounts</div>
+  </div>
+  <div class="flex gap-8">
+    <form method="post" action="/characters/sync-all">
+      <button type="submit" class="btn btn-primary">↻ Sync All Characters</button>
+    </form>
+    <a href="/auth/login" class="btn btn-outline">+ Add Character</a>
+  </div>
+</div>
+
+{% if sync_results %}
+<div class="alert alert-success">Sync complete for {{ sync_results | length }} character(s).</div>
+{% endif %}
+
+{% if characters %}
+<div class="char-grid">
+  {% for char in characters %}
+  <div class="char-card" id="char-{{ char.character_id }}">
+    <div class="char-header">
+      <img class="char-portrait"
+           src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=64"
+           alt="{{ char.name }}">
+      <div>
+        <div class="char-name">{{ char.name }}</div>
+        <div class="char-corp">{{ char.corporation_name or 'Unknown Corp' }}</div>
+        {% if char.alliance_name %}
+          <div class="char-corp">{{ char.alliance_name }}</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="char-meta">
+      <span>ID: {{ char.character_id }}</span>
+      {% if char.wallet_balance is not none %}
+        <span>Wallet: <span class="isk">{{ "{:,.0f}".format(char.wallet_balance) }} ISK</span></span>
+      {% endif %}
+      {% if char.last_synced %}
+        <span>Last sync: {{ char.last_synced.strftime('%Y-%m-%d %H:%M UTC') }}</span>
+      {% else %}
+        <span class="text-warning">Never synced</span>
+      {% endif %}
+    </div>
+
+    {% if sync_results and char.character_id in sync_results %}
+      {% set res = sync_results[char.character_id] %}
+      {% if res.errors %}
+        <div class="alert alert-warning" style="font-size:12px; padding:6px 10px;">
+          Sync errors: {{ res.errors | join(', ') }}
+        </div>
+      {% endif %}
+      {% if res.synced %}
+        <div class="alert alert-success" style="font-size:12px; padding:6px 10px;">
+          Assets: {{ res.synced.get('assets', '?') }} •
+          BPs: {{ res.synced.get('blueprints', '?') }} •
+          Skills: {{ res.synced.get('skills', '?') }} •
+          Jobs: {{ res.synced.get('industry_jobs', '?') }}
+        </div>
+      {% endif %}
+    {% endif %}
+
+    <div class="char-actions">
+      <form method="post" action="/characters/sync/{{ char.character_id }}" style="display:inline"
+            hx-post="/characters/sync/{{ char.character_id }}"
+            hx-target="#char-{{ char.character_id }}"
+            hx-swap="outerHTML">
+        <button type="submit" class="btn btn-sm btn-primary">↻ Sync</button>
+      </form>
+      <a href="/assets?character_id={{ char.character_id }}" class="btn btn-sm btn-ghost">Assets</a>
+      <a href="/blueprints?character_id={{ char.character_id }}" class="btn btn-sm btn-ghost">Blueprints</a>
+      <a href="/industry/jobs?character_id={{ char.character_id }}" class="btn btn-sm btn-ghost">Jobs</a>
+      <a href="/auth/remove/{{ char.character_id }}" class="btn btn-sm btn-danger"
+         onclick="return confirm('Remove {{ char.name }}?')">✕</a>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card">
+  <div style="text-align:center; padding: 40px 0; color: var(--text-muted);">
+    <div style="font-size: 40px; margin-bottom: 12px;">◉</div>
+    <div style="font-size: 16px; margin-bottom: 8px;">No characters connected</div>
+    <div style="margin-bottom: 20px;">Add a character to start syncing your EVE data.</div>
+    <a href="/auth/login" class="btn btn-primary">+ Add Character via EVE SSO</a>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

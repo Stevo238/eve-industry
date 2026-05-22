@@ -1,0 +1,32 @@
+<div style="margin-top:10px; padding:12px; background:var(--bg-base); border:1px solid var(--border); border-radius:4px;">
+  <div style="font-weight:600; margin-bottom:8px; color:var(--text)">{{ type_name }} — Jita Orders</div>
+  <div class="flex gap-8" style="margin-bottom:10px; font-size:13px;">
+    <span>Best sell: <strong class="isk">{% if best_sell %}{{ "{:,.2f}".format(best_sell) }} ISK{% else %}—{% endif %}</strong></span>
+    <span style="color:var(--border)">|</span>
+    <span>Best buy: <strong class="isk">{% if best_buy %}{{ "{:,.2f}".format(best_buy) }} ISK{% else %}—{% endif %}</strong></span>
+  </div>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+    <div>
+      <div style="font-size:11px; text-transform:uppercase; color:var(--text-muted); margin-bottom:4px;">Sell Orders</div>
+      {% for o in sell_orders %}
+      <div class="flex-between" style="font-size:12px; padding:3px 0; border-bottom:1px solid var(--border)">
+        <span class="isk">{{ "{:,.2f}".format(o.price) }}</span>
+        <span class="text-muted">{{ "{:,}".format(o.volume_remain) }}</span>
+      </div>
+      {% else %}
+      <div class="text-muted" style="font-size:12px">No sell orders at Jita</div>
+      {% endfor %}
+    </div>
+    <div>
+      <div style="font-size:11px; text-transform:uppercase; color:var(--text-muted); margin-bottom:4px;">Buy Orders</div>
+      {% for o in buy_orders %}
+      <div class="flex-between" style="font-size:12px; padding:3px 0; border-bottom:1px solid var(--border)">
+        <span class="isk">{{ "{:,.2f}".format(o.price) }}</span>
+        <span class="text-muted">{{ "{:,}".format(o.volume_remain) }}</span>
+      </div>
+      {% else %}
+      <div class="text-muted" style="font-size:12px">No buy orders at Jita</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>

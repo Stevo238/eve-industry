@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Manufacturing Analysis — EVE Industry{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Manufacturing Analysis</div>
+    <div class="page-sub">
+      {{ total }} blueprint(s) analysed ·
+      <span class="text-success">{{ buildable_count }} buildable now</span>
+    </div>
+  </div>
+</div>
+
+{% if not sde_available %}
+<div class="alert alert-warning">
+  SDE data not imported yet. <a href="/sde" class="text-accent">Import the SDE</a> to enable manufacturing analysis.
+</div>
+{% if sde_error %}
+<pre style="background:var(--bg-card);border:1px solid var(--border);padding:12px;border-radius:4px;font-size:11px;color:var(--error);overflow-x:auto;white-space:pre-wrap">{{ sde_error }}</pre>
+{% endif %}
+{% endif %}
+
+<form method="get" action="/industry/manufacturing">
+  <div class="filter-bar">
+    <label>Runs:
+      <input type="number" name="runs" value="{{ runs }}" min="1" max="10000" style="width:80px">
+    </label>
+    <label>Structure ME bonus (%):
+      <input type="number" name="structure_me" value="{{ structure_me }}" min="0" max="10" step="0.1" style="width:80px">
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; cursor:pointer">
+      <input type="checkbox" name="buildable_only" value="true" {% if buildable_only %}checked{% endif %}>
+      Buildable now only
+    </label>
+    <button type="submit" class="btn btn-primary">Analyse</button>
+  </div>
+</form>
+
+{% if options %}
+<div class="card" style="padding:0">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Product</th>
+          <th>Blueprint</th>
+          <th>Character</th>
+          <th style="text-align:center">ME</th>
+          <th style="text-align:center">Runs</th>
+          <th>Status</th>
+          <th>Missing Materials</th>
+          <th>Missing Skills</th>
+          <th class="td-right">Mat. Cost</th>
+          <th style="text-align:center">Time</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for opt in options %}
+        <tr>
+          <td><strong>{{ opt.product_name }}</strong></td>
+          <td class="text-muted" style="font-size:12px">{{ opt.blueprint_name }}</td>
+          <td class="text-muted">
+            {% for char in characters %}
+              {% if char.character_id == opt.character_id %}{{ char.name }}{% endif %}
+            {% endfor %}
+          </td>
+          <td style="text-align:center"><span class="me-label">ME{{ opt.blueprint_me }}</span></td>
+          <td style="text-align:center">{{ opt.runs }}</td>
+          <td>
+            {% if opt.can_build_now %}
+              <span class="badge badge-ok">✓ Ready</span>
+            {% else %}
+              <span class="badge badge-warn">⚠ Incomplete</span>
+            {% endif %}
+          </td>
+          <td>
+            {% set short = opt.materials | selectattr('shortage', 'gt', 0) | list %}
+            {% if short %}
+              <div class="mat-list">
+                {% for mat in short[:3] %}
+                  <div class="mat-row">
+                    <span class="mat-name mat-short">{{ mat.name }}</span>
+                    <span class="mat-qty">need {{ "{:,}".format(mat.shortage) }}</span>
+                  </div>
+                {% endfor %}
+                {% if short | length > 3 %}
+                  <div class="text-muted" style="font-size:11px">+{{ short | length - 3 }} more…</div>
+                {% endif %}
+              </div>
+            {% else %}
+              <span class="text-success" style="font-size:12px">All available</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if opt.missing_skills %}
+              <div style="font-size:11px; color:var(--error)">
+                {% for s in opt.missing_skills[:2] %}{{ s }}<br>{% endfor %}
+                {% if opt.missing_skills | length > 2 %}+{{ opt.missing_skills | length - 2 }} more{% endif %}
+              </div>
+            {% else %}
+              <span class="text-success" style="font-size:12px">✓</span>
+            {% endif %}
+          </td>
+          <td class="td-right">
+            {% if opt.estimated_material_cost > 0 %}
+              <span class="isk">{{ "{:,.0f}".format(opt.estimated_material_cost) }}</span>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td style="text-align:center; font-size:12px; color:var(--text-muted)">
+            {% if opt.time_seconds > 0 %}
+              {% set h = opt.time_seconds // 3600 %}
+              {% set m = (opt.time_seconds % 3600) // 60 %}
+              {% if h > 0 %}{{ h }}h {% endif %}{{ m }}m
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% elif sde_available and characters %}
+<div class="card">
+  <div style="text-align:center; padding:30px; color:var(--text-muted)">
+    No blueprints found. Sync your characters to load blueprint data.
+  </div>
+</div>
+{% endif %}
+{% endblock %}

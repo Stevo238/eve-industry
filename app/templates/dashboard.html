@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — EVE Industry{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Dashboard</div>
+    <div class="page-sub">Overview across all characters</div>
+  </div>
+  <div class="flex gap-8">
+    <form method="post" action="/characters/sync-all">
+      <button type="submit" class="btn btn-primary">↻ Sync All</button>
+    </form>
+    <a href="/auth/login" class="btn btn-outline">+ Add Character</a>
+  </div>
+</div>
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-label">Characters</div>
+    <div class="stat-value">{{ characters | length }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Active Jobs</div>
+    <div class="stat-value">{{ active_jobs }}</div>
+    <div class="stat-sub"><a href="/industry/jobs" class="text-accent">View all →</a></div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Blueprints</div>
+    <div class="stat-value">{{ total_blueprints }}</div>
+    <div class="stat-sub"><a href="/blueprints" class="text-accent">Browse →</a></div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Asset Lines</div>
+    <div class="stat-value">{{ total_assets }}</div>
+    <div class="stat-sub"><a href="/assets" class="text-accent">Browse →</a></div>
+  </div>
+</div>
+
+{% if characters %}
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Characters</span>
+  </div>
+  <div class="char-grid">
+    {% for char in characters %}
+    <div class="char-card">
+      <div class="char-header">
+        <img class="char-portrait"
+             src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=64"
+             alt="{{ char.name }}">
+        <div>
+          <div class="char-name">{{ char.name }}</div>
+          <div class="char-corp">{{ char.corporation_name or '—' }}</div>
+        </div>
+      </div>
+      <div class="char-meta">
+        {% if char.wallet_balance is not none %}
+          <span>Wallet: <span class="isk">{{ "{:,.0f}".format(char.wallet_balance) }} ISK</span></span>
+        {% endif %}
+        {% if char.last_synced %}
+          <span>Synced: {{ char.last_synced.strftime('%Y-%m-%d %H:%M') }}</span>
+        {% else %}
+          <span class="text-warning">Not synced yet</span>
+        {% endif %}
+      </div>
+      <div class="char-actions">
+        <form method="post" action="/characters/sync/{{ char.character_id }}" style="display:inline">
+          <button type="submit" class="btn btn-sm btn-ghost">↻ Sync</button>
+        </form>
+        <a href="/assets?character_id={{ char.character_id }}" class="btn btn-sm btn-ghost">Assets</a>
+        <a href="/blueprints?character_id={{ char.character_id }}" class="btn btn-sm btn-ghost">BPs</a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% else %}
+<div class="card">
+  <div style="text-align:center; padding: 40px 0; color: var(--text-muted);">
+    <div style="font-size: 40px; margin-bottom: 12px;">◉</div>
+    <div style="font-size: 16px; margin-bottom: 8px;">No characters added yet</div>
+    <div style="margin-bottom: 20px;">Connect your EVE characters to get started.</div>
+    <a href="/auth/login" class="btn btn-primary">+ Add Character</a>
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Quick Actions</span>
+  </div>
+  <div class="flex gap-8" style="flex-wrap:wrap">
+    <a href="/industry/manufacturing" class="btn btn-ghost">⚙ Manufacturing Analysis</a>
+    <a href="/industry/jobs" class="btn btn-ghost">⚒ Active Jobs</a>
+    <a href="/market" class="btn btn-ghost">◈ Market Prices</a>
+    <a href="/sde" class="btn btn-ghost">◌ SDE Import</a>
+  </div>
+</div>
+{% endblock %}

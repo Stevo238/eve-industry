@@ -1,0 +1,51 @@
+{% set char = char %}
+<div class="char-card" id="char-{{ char.character_id }}">
+  <div class="char-header">
+    <img class="char-portrait"
+         src="https://images.evetech.net/characters/{{ char.character_id }}/portrait?size=64"
+         alt="{{ char.name }}">
+    <div>
+      <div class="char-name">{{ char.name }}</div>
+      <div class="char-corp">{{ char.corporation_name or 'Unknown Corp' }}</div>
+    </div>
+  </div>
+
+  <div class="char-meta">
+    {% if char.wallet_balance is not none %}
+      <span>Wallet: <span class="isk">{{ "{:,.0f}".format(char.wallet_balance) }} ISK</span></span>
+    {% endif %}
+    {% if char.last_synced %}
+      <span>Synced: {{ char.last_synced.strftime('%Y-%m-%d %H:%M UTC') }}</span>
+    {% else %}
+      <span class="text-warning">Never synced</span>
+    {% endif %}
+  </div>
+
+  {% if sync_result %}
+    {% if errors_text %}
+      <div class="alert alert-warning" style="font-size:12px; padding:6px 10px;">{{ errors_text }}</div>
+    {% endif %}
+    {% if sync_result.synced %}
+      <div class="alert alert-success" style="font-size:12px; padding:6px 10px;">
+        Assets: {{ sync_result.synced.get('assets', '?') }} ·
+        BPs: {{ sync_result.synced.get('blueprints', '?') }} ·
+        Skills: {{ sync_result.synced.get('skills', '?') }} ·
+        Jobs: {{ sync_result.synced.get('industry_jobs', '?') }}
+      </div>
+    {% endif %}
+  {% endif %}
+
+  <div class="char-actions">
+    <form method="post" action="/characters/sync/{{ char.character_id }}" style="display:inline"
+          hx-post="/characters/sync/{{ char.character_id }}"
+          hx-target="#char-{{ char.character_id }}"
+          hx-swap="outerHTML">
+      <button type="submit" class="btn btn-sm btn-primary">↻ Sync</button>
+    </form>
+    <a href="/assets?character_id={{ char.character_id }}" class="btn btn-sm btn-ghost">Assets</a>
+    <a href="/blueprints?character_id={{ char.character_id }}" class="btn btn-sm btn-ghost">Blueprints</a>
+    <a href="/industry/jobs?character_id={{ char.character_id }}" class="btn btn-sm btn-ghost">Jobs</a>
+    <a href="/auth/remove/{{ char.character_id }}" class="btn btn-sm btn-danger"
+       onclick="return confirm('Remove {{ char.name }}?')">✕</a>
+  </div>
+</div>

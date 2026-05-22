@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Skills — {{ char.name }} — EVE Industry{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">{{ char.name }} — Skills</div>
+    <div class="page-sub">{{ skills | length }} skills trained</div>
+  </div>
+  <a href="/characters" class="btn btn-ghost">← Characters</a>
+</div>
+
+<div class="card" style="padding:0">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Skill ID</th>
+          <th style="text-align:center">Trained Level</th>
+          <th style="text-align:center">Active Level</th>
+          <th class="td-right">Skillpoints</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for skill in skills | sort(attribute='trained_level', reverse=True) %}
+        <tr>
+          <td class="td-mono">{{ skill.skill_id }}</td>
+          <td style="text-align:center">
+            <span class="{% if skill.trained_level == 5 %}text-success{% else %}text-accent{% endif %}">
+              {{ skill.trained_level }}
+            </span>
+          </td>
+          <td style="text-align:center">
+            {% if skill.active_level < skill.trained_level %}
+              <span class="text-warning">{{ skill.active_level }}</span>
+            {% else %}
+              <span class="text-muted">{{ skill.active_level }}</span>
+            {% endif %}
+          </td>
+          <td class="td-right text-muted">{{ "{:,}".format(skill.skillpoints_in_skill) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" style="text-align:center; padding:30px; color:var(--text-muted)">
+          No skills loaded. Sync this character first.
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

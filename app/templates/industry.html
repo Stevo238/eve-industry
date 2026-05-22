@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Industry Jobs — EVE Industry{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Industry Jobs</div>
+    <div class="page-sub">{{ job_rows | length }} job(s) shown</div>
+  </div>
+  <a href="/industry/manufacturing" class="btn btn-outline">⚙ Manufacturing Analysis</a>
+</div>
+
+<form method="get" action="/industry/jobs">
+  <div class="filter-bar">
+    <select name="character_id" onchange="this.form.submit()">
+      <option value="">All Characters</option>
+      {% for char in characters %}
+        <option value="{{ char.character_id }}" {% if selected_char == char.character_id %}selected{% endif %}>
+          {{ char.name }}
+        </option>
+      {% endfor %}
+    </select>
+    <select name="status" onchange="this.form.submit()">
+      <option value="active"    {% if status_filter == 'active'    %}selected{% endif %}>Active</option>
+      <option value="completed" {% if status_filter == 'completed' %}selected{% endif %}>Completed</option>
+      <option value="all"       {% if status_filter == 'all'       %}selected{% endif %}>All</option>
+    </select>
+  </div>
+</form>
+
+<div class="card" style="padding:0">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Blueprint</th>
+          <th>Product</th>
+          <th>Activity</th>
+          <th>Character</th>
+          <th style="text-align:center">Runs</th>
+          <th>Status</th>
+          <th>Time Remaining</th>
+          <th class="td-right">Cost</th>
+          <th>End Date</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in job_rows %}
+        {% set job = row.job %}
+        <tr>
+          <td>{{ row.bp_name }}</td>
+          <td>{{ row.prod_name or '—' }}</td>
+          <td class="text-muted">{{ row.activity }}</td>
+          <td class="text-muted">{{ row.char_name }}</td>
+          <td style="text-align:center">{{ "{:,}".format(job.runs) }}</td>
+          <td>
+            {% if job.status == 'active' %}
+              <span class="badge badge-active">Active</span>
+            {% elif job.status == 'ready' %}
+              <span class="badge badge-ready">Ready</span>
+            {% elif job.status == 'delivered' %}
+              <span class="badge badge-delivered">Delivered</span>
+            {% else %}
+              <span class="badge">{{ job.status | capitalize }}</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.time_remaining %}
+              <span class="text-accent">{{ row.time_remaining }}</span>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td class="td-right">
+            {% if job.cost %}
+              <span class="isk">{{ "{:,.0f}".format(job.cost) }}</span>
+            {% else %}—{% endif %}
+          </td>
+          <td class="text-muted" style="font-size:12px">
+            {{ job.end_date.strftime('%Y-%m-%d %H:%M') }}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" style="text-align:center; padding:30px; color:var(--text-muted)">
+          No jobs found. Sync your characters to load industry job data.
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

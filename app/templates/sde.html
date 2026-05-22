@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}SDE Import — EVE Industry{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">SDE Import</div>
+    <div class="page-sub">EVE Static Data Export — official CCP data source</div>
+  </div>
+</div>
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-label">Types Imported</div>
+    <div class="stat-value">{{ "{:,}".format(type_count) }}</div>
+    <div class="stat-sub">from typeIDs.yaml</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Blueprint Materials</div>
+    <div class="stat-value">{{ "{:,}".format(mat_count) }}</div>
+    <div class="stat-sub">from blueprints.yaml</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Import SDE</span>
+  </div>
+
+  <p style="color:var(--text-muted); margin-bottom:16px; line-height:1.7">
+    Downloads the official EVE SDE ZIP (~100 MB) from CCP's servers and imports it into the local database.
+    This is required before manufacturing analysis, material requirements, and item name resolution work.
+    The import runs in the background and typically takes <strong style="color:var(--text)">5–10 minutes</strong>.
+  </p>
+
+  <div style="margin-bottom:16px; padding:12px 16px; background:var(--bg-base); border:1px solid var(--border); border-radius:4px; font-size:12px; color:var(--text-muted)">
+    <strong style="color:var(--text)">Source:</strong>
+    <code style="color:var(--accent)">https://eve-static-data-export.s3-eu-west-1.amazonaws.com/tranquility/sde.zip</code>
+    <br>Official CCP S3 bucket — no third-party dependency.
+  </div>
+
+  <div id="import-status">
+    {% if import_status.running %}
+      <div class="alert alert-info" hx-get="/sde/status" hx-trigger="every 3s">
+        Importing: {{ import_status.progress }}
+      </div>
+    {% elif import_status.error %}
+      <div class="alert alert-error">Error: {{ import_status.error }}</div>
+    {% elif import_status.progress %}
+      <div class="alert alert-success">{{ import_status.progress }}</div>
+    {% endif %}
+  </div>
+
+  {% if not import_status.running %}
+  <form method="post" action="/sde/import"
+        hx-post="/sde/import"
+        hx-target="#import-status"
+        hx-swap="innerHTML">
+    <button type="submit" class="btn btn-primary"
+            {% if type_count > 0 %}onclick="return confirm('Re-import will overwrite existing SDE data. Continue?')"{% endif %}>
+      {% if type_count > 0 %}↻ Re-import SDE{% else %}⬇ Download & Import SDE{% endif %}
+    </button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">What gets imported</span>
+  </div>
+  <table>
+    <thead>
+      <tr><th>File</th><th>Contents</th><th>Used for</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="td-mono">typeIDs.yaml</td><td>All item types</td><td>Item name resolution, volumes, market groups</td></tr>
+      <tr><td class="td-mono">groupIDs.yaml</td><td>Item groups</td><td>Category resolution</td></tr>
+      <tr><td class="td-mono">categoryIDs.yaml</td><td>Item categories</td><td>Filtering by category</td></tr>
+      <tr><td class="td-mono">marketGroups.yaml</td><td>Market group tree</td><td>Market navigation</td></tr>
+      <tr><td class="td-mono">blueprints.yaml</td><td>All blueprint activities, materials, products, skills</td><td>Manufacturing analysis, requirements</td></tr>
+    </tbody>
+  </table>
+</div>
+{% endblock %}
