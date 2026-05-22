@@ -492,3 +492,70 @@ tr.row-unprofitable > td { background: rgba(224, 82, 96, 0.05); }
 }
 .bom-legend-item { display: flex; align-items: center; gap: 6px; }
 .bom-legend-dot  { width: 12px; height: 12px; border-radius: 2px; border: 1px solid; flex-shrink: 0; }
+
+/* ── Sub-materials collapsible (<details>) ────────────────────────────────── */
+.bom-sub-details {
+  border-top: 1px solid var(--border);
+}
+.bom-sub-details > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+  background: rgba(0,0,0,0.12);
+  user-select: none;
+  transition: background 0.12s, color 0.12s;
+}
+.bom-sub-details > summary::-webkit-details-marker { display: none; }
+.bom-sub-details > summary::marker { display: none; }
+.bom-sub-details > summary::before {
+  content: '▶';
+  font-size: 8px;
+  transition: transform 0.15s;
+  flex-shrink: 0;
+}
+.bom-sub-details[open] > summary::before { transform: rotate(90deg); }
+.bom-sub-details > summary:hover { color: var(--text); background: rgba(0,0,0,0.2); }
+
+.bom-sub-inner {
+  padding: 10px;
+  background: rgba(0,0,0,0.1);
+}
+
+/* ── Raw materials summary collapsible ────────────────────────────────────── */
+.bom-summary-details { margin-bottom: 0; }
+.bom-summary-toggle {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  user-select: none;
+  transition: background 0.12s;
+}
+.bom-summary-details:not([open]) .bom-summary-toggle {
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+}
+.bom-summary-toggle::-webkit-details-marker { display: none; }
+.bom-summary-toggle::marker { display: none; }
+.bom-summary-toggle-icon {
+  font-size: 10px;
+  transition: transform 0.15s;
+  flex-shrink: 0;
+}
+.bom-summary-details[open] .bom-summary-toggle-icon { transform: rotate(90deg); }
+.bom-summary-toggle:hover { background: var(--bg-hover); }

@@ -158,6 +158,58 @@ def collect_stats(root: BOMNode) -> BOMStats:
     return stats
 
 
+def collect_raw_materials(root: BOMNode) -> list[dict]:
+    """
+    Walk the whole tree and aggregate all leaf nodes (true raw materials —
+    no blueprint expansion) into a flat shopping list keyed by type_id.
+
+    The same raw material may appear in multiple branches (e.g. Tritanium
+    used by two different sub-components); we sum quantities and use the
+    single inventory figure (which is a global total, same in every branch).
+    """
+    aggregated: dict[int, dict] = {}
+
+    def walk(node: BOMNode) -> None:
+        if not node.children:
+            # Leaf node — raw material
+            if node.type_id in aggregated:
+                aggregated[node.type_id]["quantity_needed"] += node.quantity_needed
+            else:
+                aggregated[node.type_id] = {
+                    "type_id": node.type_id,
+                    "name": node.name,
+                    "quantity_needed": node.quantity_needed,
+                    "inventory_qty": node.quantity_available,  # global total, same everywhere
+                    "sell_price": node.sell_price,             # buy FROM market (cost)
+                    "buy_price": node.buy_price,               # sell TO market (revenue)
+                    "volume_each": node.volume_each,
+                }
+        else:
+            for child in node.children:
+                walk(child)
+
+    # Walk children only — root is the product, not a raw material
+    for child in root.children:
+        walk(child)
+
+    result = []
+    for item in aggregated.values():
+        qty = item["quantity_needed"]
+        inv = item["inventory_qty"]
+        shortage = max(0, qty - inv)
+        item["shortage"] = shortage
+        item["is_satisfied"] = shortage <= 0
+        item["total_cost"] = qty * item["sell_price"]
+        item["shortage_cost"] = shortage * item["sell_price"]
+        item["total_volume"] = qty * item["volume_each"]
+        item["shortage_volume"] = shortage * item["volume_each"]
+        result.append(item)
+
+    # Sort: unsatisfied first, then by total cost descending
+    result.sort(key=lambda x: (x["is_satisfied"], -x["total_cost"]))
+    return result
+
+
 async def build_product_blueprint_map(
     db: AsyncSession,
     all_blueprints: list[Blueprint],

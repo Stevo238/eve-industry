@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.engine.bom import build_bom_tree, build_product_blueprint_map, collect_stats
+from app.engine.bom import build_bom_tree, build_product_blueprint_map, collect_raw_materials, collect_stats
 from app.engine.manufacturing import get_all_manufacturing_options, get_asset_inventory
 from app.esi.sync import sync_blueprint_market_prices
 from app.models.blueprints import Blueprint
@@ -232,6 +232,7 @@ async def detail_page(
 
     tree = None
     stats = None
+    raw_materials: list = []
     selected_prod_name = ""
     error = ""
 
@@ -259,7 +260,9 @@ async def detail_page(
 
             inventory = await get_asset_inventory(db)
 
-            price_rows = (await db.execute(select(MarketPrice))).fetchall()
+            price_rows = (await db.execute(
+                select(MarketPrice.type_id, MarketPrice.buy_price, MarketPrice.sell_price)
+            )).fetchall()
             prices: dict[int, dict] = {
                 row.type_id: {
                     "buy": float(row.buy_price or 0.0),
@@ -275,6 +278,7 @@ async def detail_page(
                     structure_me_bonus=structure_me / 100.0,
                 )
                 stats = collect_stats(tree)
+                raw_materials = collect_raw_materials(tree)
             except Exception:
                 import traceback
                 error = traceback.format_exc()
@@ -288,6 +292,7 @@ async def detail_page(
             "selected_prod_name": selected_prod_name,
             "tree": tree,
             "stats": stats,
+            "raw_materials": raw_materials,
             "runs": runs,
             "structure_me": structure_me,
             "error": error,

@@ -24,15 +24,12 @@
         <label class="form-label">Blueprint / Reaction
           <span class="form-hint">Select what you want to manufacture</span>
         </label>
-        <select name="blueprint_item_id" style="width:100%; max-width:380px; background:var(--bg-base); border:1px solid var(--border); border-radius:var(--radius); color:var(--text); padding:6px 10px; font-size:13px">
+        <select name="blueprint_item_id"
+                style="width:100%; max-width:400px; background:var(--bg-base); border:1px solid var(--border); border-radius:var(--radius); color:var(--text); padding:6px 10px; font-size:13px">
           <option value="">— choose a blueprint —</option>
           {% for bp in blueprints %}
-          <option value="{{ bp.item_id }}"
-            {% if selected_item_id == bp.item_id %}selected{% endif %}>
-            {{ bp.prod_name }}
-            {% if bp.activity_label == 'Reaction' %} [Reaction]{% endif %}
-            · ME{{ bp.me }}
-            · {{ 'BPO' if bp.is_bpo else 'BPC' }}
+          <option value="{{ bp.item_id }}" {% if selected_item_id == bp.item_id %}selected{% endif %}>
+            {{ bp.prod_name }}{% if bp.activity_label == 'Reaction' %} [Reaction]{% endif %} · ME{{ bp.me }} · {{ 'BPO' if bp.is_bpo else 'BPC' }}
           </option>
           {% endfor %}
         </select>
@@ -66,7 +63,7 @@
   <div class="stat-card">
     <div class="stat-label">Make Cost</div>
     <div class="stat-value" style="font-size:18px; color:var(--warning)">{{ isk(stats.total_make_cost) }}</div>
-    <div class="stat-sub">ISK total materials</div>
+    <div class="stat-sub">ISK total</div>
   </div>
   {% if stats.revenue > 0 %}
   <div class="stat-card">
@@ -87,19 +84,19 @@
   <div class="stat-card">
     <div class="stat-label">Job Time</div>
     <div class="stat-value" style="font-size:18px">{{ time_fmt(stats.total_job_time) }}</div>
-    <div class="stat-sub">all steps combined</div>
+    <div class="stat-sub">all steps</div>
   </div>
   <div class="stat-card">
     <div class="stat-label">Sub-jobs</div>
     <div class="stat-value" style="font-size:18px">{{ stats.intermediate_count }}</div>
-    <div class="stat-sub">intermediate steps</div>
+    <div class="stat-sub">intermediate</div>
   </div>
   <div class="stat-card">
-    <div class="stat-label">Raw Materials</div>
-    <div class="stat-value" style="font-size:18px">{{ stats.raw_material_count }}</div>
+    <div class="stat-label">Raw Types</div>
+    <div class="stat-value" style="font-size:18px">{{ raw_materials | length }}</div>
     <div class="stat-sub">
-      {% if stats.missing_material_count > 0 %}
-        <span class="text-error">{{ stats.missing_material_count }} missing</span>
+      {% set missing = raw_materials | selectattr('is_satisfied', 'equalto', false) | list | length %}
+      {% if missing > 0 %}<span class="text-error">{{ missing }} missing</span>
       {% else %}all available{% endif %}
     </div>
   </div>
@@ -107,16 +104,112 @@
   <div class="stat-card" style="border-color:#d4a800">
     <div class="stat-label" style="color:#d4a800">Exit Points</div>
     <div class="stat-value" style="font-size:18px; color:#ffd700">{{ stats.exit_point_count }}</div>
-    <div class="stat-sub" style="color:#d4a800">sell-here opportunities</div>
+    <div class="stat-sub" style="color:#d4a800">sell-here opps</div>
   </div>
   {% endif %}
 </div>
 
-{# ══════════════════════════════════════════════════════════════════════════════
-   BOM TREE — recursive {% for %} with the `recursive` keyword
-   loop.depth0 == 0 → root product card (full width)
-   loop.depth0 >= 1 → material card (grid cell, may contain own sub-grid)
-   ══════════════════════════════════════════════════════════════════════════════ #}
+{# ═══════════════════════════════════════════════════════════════════════════
+   RAW MATERIALS SHOPPING LIST
+   ═══════════════════════════════════════════════════════════════════════════ #}
+{% if raw_materials %}
+<details class="bom-summary-details" open>
+  <summary class="bom-summary-toggle">
+    <span class="bom-summary-toggle-icon">▶</span>
+    📦 Raw Materials Shopping List
+    <span style="color:var(--text-muted); font-weight:400; font-size:12px; margin-left:8px">
+      {{ raw_materials | length }} types ·
+      {% set short_count = raw_materials | selectattr('is_satisfied', 'equalto', false) | list | length %}
+      {% if short_count > 0 %}<span class="text-error">{{ short_count }} to buy</span>
+      {% else %}<span class="text-success">all in stock</span>{% endif %}
+      · {{ isk(raw_materials | sum(attribute='total_cost')) }} ISK total
+    </span>
+  </summary>
+  <div class="card" style="padding:0; margin-bottom:20px; border-top:none; border-radius:0 0 var(--radius) var(--radius)">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Material</th>
+            <th class="td-right">Need</th>
+            <th class="td-right">Have</th>
+            <th class="td-right">Short</th>
+            <th class="td-right">Unit Price</th>
+            <th class="td-right">Total Cost</th>
+            <th class="td-right">To Buy</th>
+            <th class="td-right">Volume (m³)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% set total_buy = namespace(val=0) %}
+          {% for m in raw_materials %}
+          {% set _ = total_buy.__setattr__('val', total_buy.val + m.shortage_cost) %}
+          <tr class="{% if not m.is_satisfied %}row-unprofitable{% endif %}">
+            <td>
+              <span style="font-weight:500">{{ m.name }}</span>
+            </td>
+            <td class="td-right td-mono">{{ qty(m.quantity_needed) }}</td>
+            <td class="td-right td-mono {% if m.is_satisfied %}text-success{% elif m.inventory_qty > 0 %}text-warning{% else %}text-muted{% endif %}">
+              {{ qty(m.inventory_qty) }}
+            </td>
+            <td class="td-right td-mono {% if m.shortage > 0 %}text-error{% else %}text-success{% endif %}">
+              {% if m.shortage > 0 %}{{ qty(m.shortage) }}{% else %}—{% endif %}
+            </td>
+            <td class="td-right isk">
+              {% if m.sell_price > 0 %}{{ isk(m.sell_price) }}{% else %}<span class="text-muted">—</span>{% endif %}
+            </td>
+            <td class="td-right isk">
+              {% if m.total_cost > 0 %}{{ isk(m.total_cost) }}{% else %}<span class="text-muted">—</span>{% endif %}
+            </td>
+            <td class="td-right {% if m.shortage_cost > 0 %}text-error isk{% else %}text-success{% endif %}">
+              {% if m.shortage_cost > 0 %}{{ isk(m.shortage_cost) }}{% else %}✓ Have{% endif %}
+            </td>
+            <td class="td-right text-muted" style="font-size:11px">
+              {% if m.total_volume > 0 %}
+                {{ "{:,.1f}".format(m.total_volume) }}
+                {% if m.shortage_volume > 0 %}
+                  <div class="text-error" style="font-size:10px">({{ "{:,.1f}".format(m.shortage_volume) }} to ship)</div>
+                {% endif %}
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr style="border-top:2px solid var(--border)">
+            <td colspan="5" style="padding:8px 12px; font-size:12px; color:var(--text-muted)">
+              <strong style="color:var(--text)">Totals</strong>
+            </td>
+            <td class="td-right isk" style="font-weight:700; padding:8px 12px">
+              {{ isk(raw_materials | sum(attribute='total_cost')) }}
+            </td>
+            <td class="td-right text-error isk" style="font-weight:700; padding:8px 12px">
+              {% set shortage_total = raw_materials | sum(attribute='shortage_cost') %}
+              {% if shortage_total > 0 %}{{ isk(shortage_total) }}{% else %}<span class="text-success">—</span>{% endif %}
+            </td>
+            <td class="td-right text-muted" style="padding:8px 12px; font-size:11px">
+              {{ "{:,.1f}".format(raw_materials | sum(attribute='shortage_volume')) }} m³ to ship
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+</details>
+{% endif %}
+
+{# ═══════════════════════════════════════════════════════════════════════════
+   BOM TREE
+   ═══════════════════════════════════════════════════════════════════════════ #}
+
+{# Expand / Collapse all controls #}
+<div style="display:flex; gap:8px; align-items:center; margin-bottom:10px">
+  <span style="font-size:12px; color:var(--text-muted)">Sub-components:</span>
+  <button onclick="document.querySelectorAll('.bom-sub-details').forEach(d=>d.open=true)"
+          class="btn btn-ghost btn-sm">Expand All</button>
+  <button onclick="document.querySelectorAll('.bom-sub-details').forEach(d=>d.open=false)"
+          class="btn btn-ghost btn-sm">Collapse All</button>
+</div>
 
 {% for node in [tree] recursive %}
 
@@ -137,9 +230,7 @@
       {% endif %}
     </div>
     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
-      <span class="badge {% if node.is_bpo %}badge-bpo{% else %}badge-bpc{% endif %}">
-        {{ 'BPO' if node.is_bpo else 'BPC' }}
-      </span>
+      <span class="badge {% if node.is_bpo %}badge-bpo{% else %}badge-bpc{% endif %}">{{ 'BPO' if node.is_bpo else 'BPC' }}</span>
       <span class="badge badge-ok">ME{{ node.blueprint_me }}</span>
       {% if node.job_time_seconds %}
         <span style="color:var(--text-muted); font-size:12px">⏱ {{ time_fmt(node.job_time_seconds) }}</span>
@@ -150,23 +241,23 @@
     <div class="bom-root-stats">
       <div class="bom-stat-item">
         <span class="bom-stat-label">Make Cost</span>
-        <span class="bom-stat-val isk">{{ isk(node.make_cost) }} ISK</span>
+        <span class="bom-stat-val isk">{{ isk(node.make_cost) }}</span>
       </div>
       {% if node.buy_price > 0 %}
       <div class="bom-stat-item">
         <span class="bom-stat-label">Revenue</span>
-        <span class="bom-stat-val isk">{{ isk(node.total_sell_value) }} ISK</span>
+        <span class="bom-stat-val isk">{{ isk(node.total_sell_value) }}</span>
         <span class="bom-stat-sub">{{ isk(node.buy_price) }} ea</span>
       </div>
       <div class="bom-stat-item">
         <span class="bom-stat-label">Est. Profit</span>
         {% set profit = node.total_sell_value - node.make_cost %}
         {% if profit >= 0 %}
-          <span class="bom-stat-val text-success">+{{ isk(profit) }} ISK</span>
+          <span class="bom-stat-val text-success">+{{ isk(profit) }}</span>
         {% else %}
-          <span class="bom-stat-val text-error">{{ isk(profit) }} ISK</span>
+          <span class="bom-stat-val text-error">{{ isk(profit) }}</span>
         {% endif %}
-        <span class="bom-stat-sub">(before tax &amp; fees)</span>
+        <span class="bom-stat-sub">before tax &amp; fees</span>
       </div>
       {% endif %}
       <div class="bom-stat-item">
@@ -180,7 +271,7 @@
 {% if node.children %}
 <div class="bom-tier-label">
   <span class="bom-tier-icon">▼</span>
-  Materials required ({{ node.children | length }} types · {{ runs }} run{{ 's' if runs != 1 }})
+  Direct materials ({{ node.children | length }} types · {{ runs }} run{{ 's' if runs != 1 }})
 </div>
 <div class="bom-mat-grid bom-grid-l1">
   {{ loop(node.children) }}
@@ -193,46 +284,40 @@
 {% set card_cls = 'bom-mat-card ' + ('bom-exit' if node.is_exit_point else ('bom-intermediate' if is_intermediate else ('bom-missing' if node.shortage > 0 else 'bom-leaf'))) %}
 <div class="{{ card_cls }}">
 
-  {# Card header #}
+  {# Header #}
   <div class="bom-mat-header">
-    <div style="min-width:0">
+    <div style="min-width:0; flex:1">
       <div class="bom-mat-name">
-        {% if is_intermediate %}
-          {% if node.activity_label == 'Reaction' %}⚗{% else %}⚙{% endif %}
+        {% if is_intermediate %}{% if node.activity_label == 'Reaction' %}⚗{% else %}⚙{% endif %}
         {% elif node.shortage > 0 %}⚠{% else %}✓{% endif %}
         {{ node.name }}
       </div>
       <div class="bom-mat-qty">
         ×{{ qty(node.quantity_needed) }}
         {% if node.is_satisfied %}
-          <span class="text-success" style="font-size:10px">✓ have {{ qty(node.quantity_available) }}</span>
+          <span class="text-success" style="font-size:10px">✓ {{ qty(node.quantity_available) }} owned</span>
         {% elif node.quantity_available > 0 %}
           <span class="text-warning" style="font-size:10px">{{ qty(node.quantity_available) }}/{{ qty(node.quantity_needed) }}</span>
           <span class="text-error" style="font-size:10px">need {{ qty(node.shortage) }} more</span>
         {% else %}
-          <span class="text-error" style="font-size:10px">need all {{ qty(node.shortage) }}</span>
+          <span class="text-error" style="font-size:10px">0 owned</span>
         {% endif %}
       </div>
     </div>
     {% if is_intermediate %}
-    <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end">
-      <span class="badge {% if node.is_bpo %}badge-bpo{% else %}badge-bpc{% endif %}" style="font-size:10px">
-        {{ 'BPO' if node.is_bpo else 'BPC' }}
-      </span>
+    <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end; flex-shrink:0">
+      <span class="badge {% if node.is_bpo %}badge-bpo{% else %}badge-bpc{% endif %}" style="font-size:10px">{{ 'BPO' if node.is_bpo else 'BPC' }}</span>
       <span class="badge badge-ok" style="font-size:10px">ME{{ node.blueprint_me }}</span>
       {% if node.runs_needed %}
-        <span style="color:var(--text-muted); font-size:10px; white-space:nowrap">
-          {{ node.runs_needed }}r · {{ time_fmt(node.job_time_seconds) }}
-        </span>
+        <span style="color:var(--text-muted); font-size:10px; white-space:nowrap">{{ node.runs_needed }}r · {{ time_fmt(node.job_time_seconds) }}</span>
       {% endif %}
     </div>
     {% endif %}
   </div>
 
-  {# Card body — costs #}
+  {# Body — costs #}
   <div class="bom-mat-body">
     {% if is_intermediate %}
-      {# Make vs buy comparison #}
       <div class="bom-cost-row">
         <span class="bom-cost-label">Make cost</span>
         <span class="bom-cost-val isk">{{ isk(node.make_cost) }}</span>
@@ -243,12 +328,12 @@
         <span class="bom-cost-val isk text-muted">{{ isk(node.total_buy_cost) }}</span>
       </div>
       {% set saving = node.make_vs_buy_saving %}
-      {% if saving > 0 %}
+      {% if saving > 100 %}
       <div class="bom-cost-row">
         <span class="bom-cost-label">Saving by making</span>
         <span class="bom-cost-val text-success">+{{ isk(saving) }}</span>
       </div>
-      {% elif saving < 0 %}
+      {% elif saving < -100 %}
       <div class="bom-cost-row">
         <span class="bom-cost-label">Cheaper to buy by</span>
         <span class="bom-cost-val text-warning">{{ isk(-saving) }}</span>
@@ -256,7 +341,6 @@
       {% endif %}
       {% endif %}
     {% else %}
-      {# Leaf — show unit + total price #}
       {% if node.sell_price > 0 %}
       <div class="bom-cost-row">
         <span class="bom-cost-label">Buy price</span>
@@ -267,64 +351,63 @@
         <span class="bom-cost-val isk">{{ isk(node.total_buy_cost) }}</span>
       </div>
       {% else %}
+      <div class="bom-cost-row"><span class="bom-cost-label text-muted">No price data</span></div>
+      {% endif %}
+      {% if node.shortage > 0 and node.sell_price > 0 %}
       <div class="bom-cost-row">
-        <span class="bom-cost-label text-muted">No price data</span>
+        <span class="bom-cost-label text-error">To buy</span>
+        <span class="bom-cost-val text-error isk">{{ isk(node.shortage_cost) }}</span>
       </div>
       {% endif %}
-      {% if node.volume_each > 0 %}
+      {% if node.volume_each > 0 and node.shortage > 0 %}
       <div class="bom-cost-row">
-        <span class="bom-cost-label">Volume</span>
-        <span class="bom-cost-val text-muted">{{ "{:,.1f}".format(node.total_volume_needed) }} m³
-          {% if node.total_volume_short > 0 %}
-            <span class="text-error">({{ "{:,.1f}".format(node.total_volume_short) }} m³ to ship)</span>
-          {% endif %}
-        </span>
+        <span class="bom-cost-label">Ship in</span>
+        <span class="bom-cost-val text-muted" style="font-size:11px">{{ "{:,.1f}".format(node.total_volume_short) }} m³</span>
       </div>
       {% endif %}
     {% endif %}
   </div>
 
-  {# Exit point banner — sell here instead of using as a material #}
+  {# Exit point banner #}
   {% if node.is_exit_point %}
   <div class="bom-exit-banner">
-    ⚡ <strong>Sell-here opportunity:</strong>
-    {{ isk(node.total_sell_value) }} ISK revenue
-    vs {{ isk(node.make_cost) }} ISK make cost
-    → <strong>+{{ isk(node.exit_profit) }} ISK profit</strong> if sold
+    ⚡ <strong>Sell here:</strong> {{ isk(node.total_sell_value) }} ISK revenue vs {{ isk(node.make_cost) }} ISK cost → <strong>+{{ isk(node.exit_profit) }} ISK</strong>
   </div>
   {% endif %}
 
-  {# Sub-materials (recursive) #}
+  {# Sub-materials — collapsible #}
   {% if node.children %}
-  <div class="bom-sub-section">
-    <div class="bom-sub-label">
-      Sub-materials · {{ node.children | length }} types
+  <details class="bom-sub-details" open>
+    <summary>
+      {% if node.activity_label == 'Reaction' %}⚗{% else %}⚙{% endif %}
+      {{ node.children | length }} sub-material{{ 's' if node.children | length != 1 }}
       {% if node.runs_needed %} · {{ node.runs_needed }} run{{ 's' if node.runs_needed != 1 }}{% endif %}
+      · {{ time_fmt(node.job_time_seconds) }}
+    </summary>
+    <div class="bom-sub-inner">
+      <div class="bom-sub-grid">
+        {{ loop(node.children) }}
+      </div>
     </div>
-    <div class="bom-sub-grid">
-      {{ loop(node.children) }}
-    </div>
-  </div>
+  </details>
   {% endif %}
 
 </div>{# end bom-mat-card #}
 {% endif %}
 
-{% endfor %}{# end recursive for #}
+{% endfor %}
 
-{# ── Legend ──────────────────────────────────────────────────────────────── #}
+{# ── Legend ───────────────────────────────────────────────────────────────── #}
 <div class="bom-legend">
-  <span class="bom-legend-item"><span class="bom-legend-dot" style="background:rgba(0,200,150,0.3);border-color:var(--success)"></span> Satisfied</span>
-  <span class="bom-legend-item"><span class="bom-legend-dot" style="background:rgba(240,180,41,0.2);border-color:var(--warning)"></span> Has blueprint (sub-manufacture)</span>
-  <span class="bom-legend-item"><span class="bom-legend-dot" style="background:rgba(224,82,96,0.2);border-color:var(--error)"></span> Missing materials</span>
-  <span class="bom-legend-item"><span class="bom-legend-dot" style="background:rgba(255,215,0,0.15);border-color:#d4a800"></span> ⚡ Profitable exit point</span>
+  <span class="bom-legend-item"><span class="bom-legend-dot" style="background:rgba(0,0,0,0);border-color:var(--border)"></span> In stock</span>
+  <span class="bom-legend-item"><span class="bom-legend-dot" style="background:rgba(240,180,41,0.12);border-color:var(--warning)"></span> Has blueprint (sub-manufacture)</span>
+  <span class="bom-legend-item"><span class="bom-legend-dot" style="background:rgba(224,82,96,0.12);border-color:var(--error)"></span> Missing materials</span>
+  <span class="bom-legend-item"><span class="bom-legend-dot" style="background:rgba(212,168,0,0.12);border-color:#d4a800"></span> ⚡ Profitable exit point</span>
 </div>
 
 {% elif selected_item_id %}
 <div class="card">
-  <div style="text-align:center; padding:30px; color:var(--text-muted)">
-    Blueprint not found or no product data available in SDE.
-  </div>
+  <div style="text-align:center; padding:30px; color:var(--text-muted)">Blueprint not found or no product data in SDE.</div>
 </div>
 {% elif blueprints %}
 <div class="card">
