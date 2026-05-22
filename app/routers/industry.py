@@ -12,6 +12,7 @@ from app.esi.sync import sync_blueprint_market_prices
 from app.models.character import Character
 from app.models.industry import IndustryJob
 from app.models.market import MarketPrice
+from app.models.settings import MARKET_HUBS
 from app.models.sde import SdeType
 from app.routers.settings import get_settings
 
@@ -27,8 +28,7 @@ ACTIVITY_NAMES = {
 router = APIRouter(prefix="/industry", tags=["industry"])
 templates = Jinja2Templates(directory="app/templates")
 
-# Simple progress flag for background market price fetch
-_price_sync_status: dict = {"running": False, "done": 0, "error": ""}
+_price_sync_status: dict = {"running": False, "done": 0, "error": "", "hub": ""}
 
 
 @router.get("/jobs", response_class=HTMLResponse)
@@ -91,24 +91,22 @@ async def manufacturing_page(
     runs: int = 1,
     buildable_only: bool = False,
     structure_me: float = 0.0,
-    inbound_isk_m3: float | None = None,
-    outbound_isk_m3: float | None = None,
+    activity_filter: str = "all",   # "all" | "manufacturing" | "reactions"
     db: AsyncSession = Depends(get_db),
 ):
     chars_result = await db.execute(select(Character).order_by(Character.name))
     characters = chars_result.scalars().all()
     character_ids = [c.character_id for c in characters]
 
-    # Load user settings as defaults; query params override them if provided
+    # All config comes from Settings — no per-page overrides for shipping/hub
     cfg = await get_settings(db)
-    if inbound_isk_m3 is None:
-        inbound_isk_m3 = float(cfg.get("inbound_shipping_isk_per_m3", "0") or 0)
-    if outbound_isk_m3 is None:
-        outbound_isk_m3 = float(cfg.get("outbound_shipping_isk_per_m3", "0") or 0)
-    sales_tax_pct = float(cfg.get("sales_tax_pct", "2.0") or 2.0)
-    broker_fee_pct = float(cfg.get("broker_fee_pct", "3.0") or 3.0)
+    inbound_isk_m3  = float(cfg.get("inbound_shipping_isk_per_m3", "0") or 0)
+    outbound_isk_m3 = float(cfg.get("outbound_shipping_isk_per_m3", "0") or 0)
+    sales_tax_pct   = float(cfg.get("sales_tax_pct", "2.0") or 2.0)
+    broker_fee_pct  = float(cfg.get("broker_fee_pct", "3.0") or 3.0)
+    region_id       = int(cfg.get("market_region_id", "10000002") or 10000002)
+    hub_name        = MARKET_HUBS.get(str(region_id), f"Region {region_id}")
 
-    # Check if we have any Jita buy/sell prices at all
     price_row = (
         await db.execute(
             select(MarketPrice).where(MarketPrice.buy_price.isnot(None)).limit(1)
@@ -127,6 +125,7 @@ async def manufacturing_page(
                 runs=runs,
                 structure_me_bonus=structure_me / 100.0,
                 buildable_only=buildable_only,
+                activity_filter=activity_filter,
                 inbound_isk_per_m3=inbound_isk_m3,
                 outbound_isk_per_m3=outbound_isk_m3,
                 sales_tax_pct=sales_tax_pct,
@@ -146,16 +145,17 @@ async def manufacturing_page(
             "runs": runs,
             "buildable_only": buildable_only,
             "structure_me": structure_me,
+            "activity_filter": activity_filter,
             "sde_available": sde_available,
             "sde_error": sde_error,
             "total": len(options),
             "buildable_count": sum(1 for o in options if o.can_build_now),
             "has_order_prices": has_order_prices,
             "price_sync_status": _price_sync_status,
+            "hub_name": hub_name,
             "inbound_isk_m3": inbound_isk_m3,
             "outbound_isk_m3": outbound_isk_m3,
             "sales_tax_pct": sales_tax_pct,
-            "broker_fee_pct": broker_fee_pct,
         },
     )
 
@@ -166,43 +166,48 @@ async def fetch_market_prices(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
-    """Trigger a background fetch of Jita buy/sell prices for blueprint types."""
     if _price_sync_status["running"]:
         return HTMLResponse(
             '<div class="alert alert-info" hx-get="/industry/prices-status" '
             'hx-trigger="every 3s">Already fetching prices…</div>'
         )
-    background_tasks.add_task(_run_price_sync)
+    # Read region from settings before kicking off background task
+    cfg = await get_settings(db)
+    region_id = int(cfg.get("market_region_id", "10000002") or 10000002)
+    hub_name  = MARKET_HUBS.get(str(region_id), f"Region {region_id}")
+    _price_sync_status["hub"] = hub_name
+    background_tasks.add_task(_run_price_sync, region_id)
     return HTMLResponse(
-        '<div class="alert alert-info" hx-get="/industry/prices-status" '
-        'hx-trigger="every 3s">Fetching Jita prices in background…</div>'
+        f'<div class="alert alert-info" hx-get="/industry/prices-status" '
+        f'hx-trigger="every 3s">Fetching prices from {hub_name}…</div>'
     )
 
 
 @router.get("/prices-status", response_class=HTMLResponse)
 async def prices_status(request: Request):
     s = _price_sync_status
+    hub = s.get("hub", "market")
     if s["error"]:
         return HTMLResponse(f'<div class="alert alert-error">Price fetch error: {s["error"]}</div>')
     if s["running"]:
         return HTMLResponse(
-            '<div class="alert alert-info" hx-get="/industry/prices-status" '
-            f'hx-trigger="every 3s">Fetching Jita prices… ({s["done"]} types done)</div>'
+            f'<div class="alert alert-info" hx-get="/industry/prices-status" '
+            f'hx-trigger="every 3s">Fetching prices from {hub}… ({s["done"]} types done)</div>'
         )
     if s["done"]:
         return HTMLResponse(
-            f'<div class="alert alert-success">✓ Fetched prices for {s["done"]} types. '
+            f'<div class="alert alert-success">✓ Fetched {s["done"]} prices from {hub}. '
             f'<a href="/industry/manufacturing">Refresh analysis</a></div>'
         )
     return HTMLResponse("")
 
 
-async def _run_price_sync():
+async def _run_price_sync(region_id: int = 10000002):
     from app.database import AsyncSessionLocal
     _price_sync_status.update({"running": True, "done": 0, "error": ""})
     try:
         async with AsyncSessionLocal() as db:
-            count = await sync_blueprint_market_prices(db)
+            count = await sync_blueprint_market_prices(db, region_id=region_id)
             _price_sync_status["done"] = count
     except Exception as exc:
         _price_sync_status["error"] = str(exc)

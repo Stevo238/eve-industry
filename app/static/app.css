@@ -322,6 +322,15 @@ hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
   width: 200px;
 }
 .form-input:focus { outline: none; border-color: var(--accent); }
+.settings-heading {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.settings-hint { font-size: 12px; color: var(--text-muted); margin: 0 0 14px; }
 
 /* ── Manufacturing table row colouring ─────────────── */
 tr.row-profitable > td { background: rgba(0, 200, 150, 0.06); }

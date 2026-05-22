@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.settings import SETTING_DEFAULTS, UserSetting
+from app.models.settings import MARKET_HUBS, SETTING_DEFAULTS, UserSetting
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 templates = Jinja2Templates(directory="app/templates")
@@ -32,7 +32,12 @@ async def get_setting_float(db: AsyncSession, key: str) -> float:
 async def settings_page(request: Request, db: AsyncSession = Depends(get_db)):
     settings = await get_settings(db)
     return templates.TemplateResponse(
-        "settings.html", {"request": request, "settings": settings}
+        "settings.html",
+        {
+            "request": request,
+            "settings": settings,
+            "market_hubs": MARKET_HUBS,
+        },
     )
 
 
@@ -40,7 +45,7 @@ async def settings_page(request: Request, db: AsyncSession = Depends(get_db)):
 async def save_settings(request: Request, db: AsyncSession = Depends(get_db)):
     form = await request.form()
     for key in SETTING_DEFAULTS:
-        value = str(form.get(key, "0"))
+        value = str(form.get(key, SETTING_DEFAULTS[key]))
         existing = await db.get(UserSetting, key)
         if existing:
             existing.value = value

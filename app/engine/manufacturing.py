@@ -31,6 +31,9 @@ from app.models.sde import (
 )
 
 ACTIVITY_MANUFACTURING = 1
+ACTIVITY_REACTIONS = 11
+SUPPORTED_ACTIVITIES = [ACTIVITY_MANUFACTURING, ACTIVITY_REACTIONS]
+ACTIVITY_LABEL = {ACTIVITY_MANUFACTURING: "Manufacturing", ACTIVITY_REACTIONS: "Reaction"}
 
 
 @dataclass
@@ -88,6 +91,7 @@ class ManufacturingOption:
     blueprint_me: int
     blueprint_te: int
     is_bpo: bool
+    activity_label: str = "Manufacturing"
     materials: list[MaterialRequirement] = field(default_factory=list)
     missing_skills: list[str] = field(default_factory=list)
     can_build_now: bool = False
@@ -255,20 +259,27 @@ async def analyse_blueprint(
     if not blueprint.is_original and runs > blueprint.runs:
         runs = blueprint.runs
 
-    act_result = await db.execute(
-        select(SdeBlueprintActivity).where(
-            SdeBlueprintActivity.blueprint_type_id == blueprint.type_id,
-            SdeBlueprintActivity.activity_id == ACTIVITY_MANUFACTURING,
+    # Find the first supported activity this blueprint has (manufacturing, then reactions)
+    activity = None
+    activity_id = ACTIVITY_MANUFACTURING
+    for act_id in SUPPORTED_ACTIVITIES:
+        act_result = await db.execute(
+            select(SdeBlueprintActivity).where(
+                SdeBlueprintActivity.blueprint_type_id == blueprint.type_id,
+                SdeBlueprintActivity.activity_id == act_id,
+            )
         )
-    )
-    activity = act_result.scalar_one_or_none()
+        activity = act_result.scalar_one_or_none()
+        if activity:
+            activity_id = act_id
+            break
     if activity is None:
         return None
 
     prod_result = await db.execute(
         select(SdeBlueprintProduct).where(
             SdeBlueprintProduct.blueprint_type_id == blueprint.type_id,
-            SdeBlueprintProduct.activity_id == ACTIVITY_MANUFACTURING,
+            SdeBlueprintProduct.activity_id == activity_id,
         )
     )
     product_row = prod_result.scalar_one_or_none()
@@ -305,11 +316,11 @@ async def analyse_blueprint(
     product_sell_price = prod_prices.get("sell", 0.0)
     product_buy_price = prod_prices.get("buy", 0.0)
 
-    # Fetch SDE materials
+    # Fetch SDE materials for this activity
     mat_result = await db.execute(
         select(SdeBlueprintMaterial).where(
             SdeBlueprintMaterial.blueprint_type_id == blueprint.type_id,
-            SdeBlueprintMaterial.activity_id == ACTIVITY_MANUFACTURING,
+            SdeBlueprintMaterial.activity_id == activity_id,
         )
     )
     sde_materials = mat_result.scalars().all()
@@ -361,7 +372,7 @@ async def analyse_blueprint(
     skill_result = await db.execute(
         select(SdeBlueprintSkill).where(
             SdeBlueprintSkill.blueprint_type_id == blueprint.type_id,
-            SdeBlueprintSkill.activity_id == ACTIVITY_MANUFACTURING,
+            SdeBlueprintSkill.activity_id == activity_id,
         )
     )
     required_skills = skill_result.scalars().all()
@@ -414,6 +425,7 @@ async def analyse_blueprint(
         blueprint_me=blueprint.material_efficiency,
         blueprint_te=blueprint.time_efficiency,
         is_bpo=blueprint.is_original,
+        activity_label=ACTIVITY_LABEL.get(activity_id, "Unknown"),
         materials=materials,
         missing_skills=missing_skills,
         can_build_now=can_build_now,
@@ -439,6 +451,7 @@ async def get_all_manufacturing_options(
     runs: int = 1,
     structure_me_bonus: float = 0.0,
     buildable_only: bool = False,
+    activity_filter: str = "all",   # "all" | "manufacturing" | "reactions"
     inbound_isk_per_m3: float = 0.0,
     outbound_isk_per_m3: float = 0.0,
     sales_tax_pct: float = 2.0,
@@ -465,6 +478,10 @@ async def get_all_manufacturing_options(
         if opt is None:
             continue
         if buildable_only and not opt.can_build_now:
+            continue
+        if activity_filter == "manufacturing" and opt.activity_label != "Manufacturing":
+            continue
+        if activity_filter == "reactions" and opt.activity_label != "Reaction":
             continue
         options.append(opt)
 

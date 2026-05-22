@@ -4,7 +4,7 @@
 <div class="page-header">
   <div>
     <div class="page-title">Settings</div>
-    <div class="page-sub">Logistics costs and market fee configuration</div>
+    <div class="page-sub">Market hub, shipping costs, and tax configuration</div>
   </div>
 </div>
 
@@ -14,29 +14,44 @@
 
 <form method="post" action="/settings">
   <div class="card" style="max-width:640px">
-    <h3 style="margin:0 0 16px; font-size:14px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em">
-      Shipping / Logistics
-    </h3>
-    <p style="font-size:13px; color:var(--text-muted); margin:0 0 16px">
-      These costs are applied per m³ of materials (inbound) and finished goods (outbound).
-      Set to 0 if manufacturing is done locally in Jita.
-    </p>
 
+    <h3 class="settings-heading">Market Hub</h3>
+    <p class="settings-hint">
+      Prices are fetched from this region's order book. Choose the market
+      where you will sell your finished goods.
+    </p>
+    <div class="form-row">
+      <label class="form-label">Market hub</label>
+      <select name="market_region_id" class="form-input">
+        {% for region_id, hub_name in market_hubs.items() %}
+          <option value="{{ region_id }}"
+            {% if settings.market_region_id == region_id %}selected{% endif %}>
+            {{ hub_name }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <h3 class="settings-heading" style="margin-top:24px">Shipping / Logistics</h3>
+    <p class="settings-hint">
+      Set your shipping contract rates. Inbound is charged only on materials
+      you need to <em>buy</em> (owned materials are already on-site).
+      Outbound is charged on finished goods shipped back to market.
+    </p>
     <div style="display:grid; gap:16px">
       <div class="form-row">
         <label class="form-label">
           Inbound shipping (ISK / m³)
-          <span class="form-hint">Buying materials in Jita → shipping to production system</span>
+          <span class="form-hint">Buying materials in hub → shipping to production system</span>
         </label>
         <input type="number" name="inbound_shipping_isk_per_m3"
                value="{{ settings.inbound_shipping_isk_per_m3 }}"
                min="0" step="0.01" class="form-input">
       </div>
-
       <div class="form-row">
         <label class="form-label">
           Outbound shipping (ISK / m³)
-          <span class="form-hint">Shipping finished goods from production system → Jita to sell</span>
+          <span class="form-hint">Shipping finished goods from production system → market hub</span>
         </label>
         <input type="number" name="outbound_shipping_isk_per_m3"
                value="{{ settings.outbound_shipping_isk_per_m3 }}"
@@ -44,19 +59,17 @@
       </div>
     </div>
 
-    <h3 style="margin:24px 0 16px; font-size:14px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em">
-      Market Fees
-    </h3>
-    <p style="font-size:13px; color:var(--text-muted); margin:0 0 16px">
-      Profitability assumes instant transactions: materials bought from sell orders,
-      finished goods sold to buy orders. No broker fee is charged (no sell order placed).
+    <h3 class="settings-heading" style="margin-top:24px">Market Fees</h3>
+    <p class="settings-hint">
+      Profitability assumes instant transactions — materials bought from sell
+      orders, finished goods sold to buy orders. No broker fee is charged
+      (no sell order is placed).
     </p>
-
     <div style="display:grid; gap:16px">
       <div class="form-row">
         <label class="form-label">
           Sales tax (%)
-          <span class="form-hint">Applied when selling product to buy orders. Typical: 1.8% (Accounting V), 2.0% (IV), up to 8% Alpha</span>
+          <span class="form-hint">Applies when selling to buy orders. Typical: 1.8% (Accounting V), 2.0% (IV), up to 8% Alpha</span>
         </label>
         <input type="number" name="sales_tax_pct"
                value="{{ settings.sales_tax_pct }}"

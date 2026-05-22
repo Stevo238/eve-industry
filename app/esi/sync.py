@@ -303,7 +303,7 @@ async def sync_market_prices(db: AsyncSession) -> int:
 # ---------------------------------------------------------------------------
 
 
-async def sync_blueprint_market_prices(db: AsyncSession) -> int:
+async def sync_blueprint_market_prices(db: AsyncSession, region_id: int = 10000002) -> int:
     """
     Fetch best Jita buy and sell prices for types used by the user's own
     blueprints (materials + products only — not the entire SDE).
@@ -319,8 +319,8 @@ async def sync_blueprint_market_prices(db: AsyncSession) -> int:
     from app.models.sde import SdeBlueprintMaterial, SdeBlueprintProduct
     from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-    REGION_ID = 10000002  # The Forge (Jita)
-    ACTIVITY_MFG = 1
+    REGION_ID = region_id
+    SUPPORTED_ACTIVITIES = [1, 11]  # manufacturing + reactions
 
     # ── Scope to blueprints the user actually owns ────────────────────────
     user_bp_type_ids = [
@@ -339,7 +339,7 @@ async def sync_blueprint_market_prices(db: AsyncSession) -> int:
             await db.execute(
                 select(SdeBlueprintMaterial.material_type_id)
                 .where(SdeBlueprintMaterial.blueprint_type_id.in_(user_bp_type_ids))
-                .where(SdeBlueprintMaterial.activity_id == ACTIVITY_MFG)
+                .where(SdeBlueprintMaterial.activity_id.in_(SUPPORTED_ACTIVITIES))
                 .distinct()
             )
         ).fetchall()
@@ -350,7 +350,7 @@ async def sync_blueprint_market_prices(db: AsyncSession) -> int:
             await db.execute(
                 select(SdeBlueprintProduct.product_type_id)
                 .where(SdeBlueprintProduct.blueprint_type_id.in_(user_bp_type_ids))
-                .where(SdeBlueprintProduct.activity_id == ACTIVITY_MFG)
+                .where(SdeBlueprintProduct.activity_id.in_(SUPPORTED_ACTIVITIES))
                 .distinct()
             )
         ).fetchall()

@@ -7,11 +7,10 @@
     <div class="page-sub">
       {{ total }} blueprint(s) ·
       <span class="text-success">{{ buildable_count }} buildable now</span>
+      · {{ hub_name }}
       {% if inbound_isk_m3 or outbound_isk_m3 %}
         · ↓ {{ "{:,.0f}".format(inbound_isk_m3) }} ISK/m³ in
         · ↑ {{ "{:,.0f}".format(outbound_isk_m3) }} ISK/m³ out
-      {% else %}
-        · No shipping costs set
       {% endif %}
     </div>
   </div>
@@ -35,15 +34,15 @@
   <span>⚠ No Jita buy/sell prices loaded yet — profitability columns will be empty.</span>
   <form method="post" action="/industry/fetch-prices" style="margin:0"
         hx-post="/industry/fetch-prices" hx-target="#price-status" hx-swap="outerHTML">
-    <button type="submit" class="btn btn-primary btn-sm">Fetch Jita Prices</button>
+    <button type="submit" class="btn btn-primary btn-sm">Fetch {{ hub_name }} Prices</button>
   </form>
 </div>
 {% else %}
 <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; font-size:12px; color:var(--text-muted)">
-  ✓ Jita prices loaded ·
+  ✓ {{ hub_name }} prices loaded ·
   <form method="post" action="/industry/fetch-prices" style="margin:0"
         hx-post="/industry/fetch-prices" hx-target="#price-status" hx-swap="outerHTML">
-    <button type="submit" class="btn btn-ghost btn-sm">↻ Refresh Prices</button>
+    <button type="submit" class="btn btn-ghost btn-sm">↻ Refresh {{ hub_name }} Prices</button>
   </form>
 </div>
 {% endif %}
@@ -58,13 +57,12 @@
     <label>Structure ME (%):
       <input type="number" name="structure_me" value="{{ structure_me }}" min="0" max="10" step="0.1" style="width:64px">
     </label>
-    <label title="ISK per m³ to ship purchased materials from Jita to your production system. Only applied to materials you need to buy — owned materials are already on-site.">
-      Ship IN (ISK/m³):
-      <input type="number" name="inbound_isk_m3" value="{{ inbound_isk_m3 }}" min="0" step="0.01" style="width:90px">
-    </label>
-    <label title="ISK per m³ to ship finished goods from your production system back to market (Jita).">
-      Ship OUT (ISK/m³):
-      <input type="number" name="outbound_isk_m3" value="{{ outbound_isk_m3 }}" min="0" step="0.01" style="width:90px">
+    <label>Activity:
+      <select name="activity_filter" style="width:140px">
+        <option value="all" {% if activity_filter == 'all' %}selected{% endif %}>All</option>
+        <option value="manufacturing" {% if activity_filter == 'manufacturing' %}selected{% endif %}>Manufacturing</option>
+        <option value="reactions" {% if activity_filter == 'reactions' %}selected{% endif %}>Reactions</option>
+      </select>
     </label>
     <label style="display:flex; align-items:center; gap:6px; cursor:pointer">
       <input type="checkbox" name="buildable_only" value="true" {% if buildable_only %}checked{% endif %}>
@@ -82,6 +80,7 @@
         <tr>
           <th>Product</th>
           <th>Blueprint</th>
+          <th>Type</th>
           <th style="text-align:center">ME</th>
           <th style="text-align:center">Runs</th>
           <th>Status</th>
@@ -96,7 +95,7 @@
       </thead>
       <tbody>
         {% for opt in options %}
-        {% set has_prices = opt.product_sell_price > 0 %}
+        {% set has_prices = opt.product_buy_price > 0 %}
         <tr class="{% if opt.recommendation == 'manufacture' %}row-profitable{% elif has_prices %}row-unprofitable{% endif %}">
           <td>
             <strong>{{ opt.product_name }}</strong>
@@ -109,6 +108,13 @@
             <span>ME{{ opt.blueprint_me }} ·
             {% for char in characters %}{% if char.character_id == opt.character_id %}{{ char.name }}{% endif %}{% endfor %}
             </span>
+          </td>
+          <td style="white-space:nowrap">
+            {% if opt.activity_label == 'Reaction' %}
+              <span class="badge badge-bpc">⚗ Reaction</span>
+            {% else %}
+              <span class="badge badge-ok">⚙ Mfg</span>
+            {% endif %}
           </td>
           <td style="text-align:center"><span class="me-label">ME{{ opt.blueprint_me }}</span></td>
           <td style="text-align:center">{{ opt.runs }}</td>
