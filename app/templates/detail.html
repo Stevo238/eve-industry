@@ -354,7 +354,7 @@
       {% if node.shortage > 0 and node.sell_price > 0 %}
       <div class="bom-cost-row">
         <span class="bom-cost-label text-error">To buy</span>
-        <span class="bom-cost-val text-error isk">{{ isk(node.shortage_cost) }}</span>
+        <span class="bom-cost-val text-error isk">{{ isk(node.shortage * node.sell_price) }}</span>
       </div>
       {% endif %}
       {% if node.volume_each > 0 and node.shortage > 0 %}
