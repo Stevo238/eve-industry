@@ -134,9 +134,9 @@
             <th class="td-right">Need</th>
             <th class="td-right">Have</th>
             <th class="td-right">Short</th>
-            <th class="td-right">Unit Price</th>
-            <th class="td-right">Total Cost</th>
-            <th class="td-right">To Buy</th>
+            <th class="td-right">True Cost</th>
+            <th class="td-right" style="font-size:10px; color:var(--text-muted)" title="Owned qty × buy order price (opportunity cost)">↳ Owned</th>
+            <th class="td-right" style="font-size:10px; color:var(--error)" title="Missing qty × sell order price (acquisition cost)">↳ To Buy</th>
             <th class="td-right">Volume (m³)</th>
           </tr>
         </thead>
@@ -153,11 +153,11 @@
             <td class="td-right td-mono {% if m.shortage > 0 %}text-error{% else %}text-success{% endif %}">
               {% if m.shortage > 0 %}{{ qty(m.shortage) }}{% else %}—{% endif %}
             </td>
-            <td class="td-right isk">
-              {% if m.sell_price > 0 %}{{ isk(m.sell_price) }}{% else %}<span class="text-muted">—</span>{% endif %}
-            </td>
-            <td class="td-right isk">
+            <td class="td-right isk" title="Owned: {{ '{:,}'.format([m.quantity_needed, m.inventory_qty] | min) }} × buy price + Missing: {{ '{:,}'.format(m.shortage) }} × sell price">
               {% if m.total_cost > 0 %}{{ isk(m.total_cost) }}{% else %}<span class="text-muted">—</span>{% endif %}
+            </td>
+            <td class="td-right text-muted isk" style="font-size:12px">
+              {% if m.cost_owned > 0 %}{{ isk(m.cost_owned) }}{% else %}<span style="color:var(--border)">—</span>{% endif %}
             </td>
             <td class="td-right {% if m.shortage_cost > 0 %}text-error isk{% else %}text-success{% endif %}">
               {% if m.shortage_cost > 0 %}{{ isk(m.shortage_cost) }}{% else %}✓ Have{% endif %}
@@ -175,11 +175,15 @@
         </tbody>
         <tfoot>
           <tr style="border-top:2px solid var(--border)">
-            <td colspan="5" style="padding:8px 12px; font-size:12px; color:var(--text-muted)">
+            <td colspan="4" style="padding:8px 12px; font-size:12px; color:var(--text-muted)">
               <strong style="color:var(--text)">Totals</strong>
+              <span style="font-size:11px; margin-left:8px">true cost = owned at opportunity price + missing at market price</span>
             </td>
             <td class="td-right isk" style="font-weight:700; padding:8px 12px">
               {{ isk(raw_materials | sum(attribute='total_cost')) }}
+            </td>
+            <td class="td-right text-muted isk" style="font-weight:700; padding:8px 12px; font-size:12px">
+              {{ isk(raw_materials | sum(attribute='cost_owned')) }}
             </td>
             <td class="td-right text-error isk" style="font-weight:700; padding:8px 12px">
               {% set shortage_total = raw_materials | sum(attribute='shortage_cost') %}
@@ -321,8 +325,8 @@
         <span class="bom-cost-val isk">{{ isk(node.make_cost) }}</span>
       </div>
       {% if node.sell_price > 0 %}
-      <div class="bom-cost-row">
-        <span class="bom-cost-label">Buy from market</span>
+      <div class="bom-cost-row" title="Worst-case cost if you bought all {{ '{:,}'.format(node.quantity_needed) }} units at market sell price">
+        <span class="bom-cost-label text-muted">Buy from market</span>
         <span class="bom-cost-val isk text-muted">{{ isk(node.total_buy_cost) }}</span>
       </div>
       {% set saving = node.make_vs_buy_saving %}
@@ -339,23 +343,25 @@
       {% endif %}
       {% endif %}
     {% else %}
-      {% if node.sell_price > 0 %}
-      <div class="bom-cost-row">
-        <span class="bom-cost-label">Buy price</span>
-        <span class="bom-cost-val isk">{{ isk(node.sell_price) }} ea</span>
-      </div>
+      {% if node.sell_price > 0 or node.buy_price > 0 %}
       <div class="bom-cost-row">
         <span class="bom-cost-label">Total cost</span>
-        <span class="bom-cost-val isk">{{ isk(node.total_buy_cost) }}</span>
+        <span class="bom-cost-val isk">{{ isk(node.true_material_cost) }}</span>
       </div>
+      {% if node.quantity_available > 0 and node.cost_owned > 0 %}
+      <div class="bom-cost-row" title="Opportunity cost: valued at what you'd get selling {{ '{:,}'.format([node.quantity_needed, node.quantity_available] | min) }} units to buy orders">
+        <span class="bom-cost-label text-muted" style="padding-left:8px">↳ owned ×{{ qty([node.quantity_needed, node.quantity_available] | min) }}</span>
+        <span class="bom-cost-val text-muted isk">{{ isk(node.cost_owned) }}</span>
+      </div>
+      {% endif %}
+      {% if node.shortage > 0 %}
+      <div class="bom-cost-row" title="Acquisition cost: buy {{ '{:,}'.format(node.shortage) }} units at market sell order price">
+        <span class="bom-cost-label text-error" style="padding-left:8px">↳ buy ×{{ qty(node.shortage) }}</span>
+        <span class="bom-cost-val text-error isk">{{ isk(node.cost_to_buy) }}</span>
+      </div>
+      {% endif %}
       {% else %}
       <div class="bom-cost-row"><span class="bom-cost-label text-muted">No price data</span></div>
-      {% endif %}
-      {% if node.shortage > 0 and node.sell_price > 0 %}
-      <div class="bom-cost-row">
-        <span class="bom-cost-label text-error">To buy</span>
-        <span class="bom-cost-val text-error isk">{{ isk(node.shortage * node.sell_price) }}</span>
-      </div>
       {% endif %}
       {% if node.volume_each > 0 and node.shortage > 0 %}
       <div class="bom-cost-row">

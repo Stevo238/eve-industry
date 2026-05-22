@@ -64,9 +64,38 @@ class BOMNode:
     def is_satisfied(self) -> bool:
         return self.shortage <= 0
 
+    # ── Per-unit acquisition cost ────────────────────────────────────────────
+
+    @property
+    def cost_owned(self) -> float:
+        """
+        Opportunity cost of the units you already own.
+        Priced at the buy order price — what you'd receive selling them instead
+        of consuming them. Capped at quantity_needed.
+        """
+        owned = min(self.quantity_needed, self.quantity_available)
+        return owned * self.buy_price
+
+    @property
+    def cost_to_buy(self) -> float:
+        """
+        Acquisition cost of the units you still need to buy.
+        Priced at the sell order price — what you'd actually pay on the market.
+        """
+        return self.shortage * self.sell_price
+
+    @property
+    def true_material_cost(self) -> float:
+        """
+        Realistic cost for this material:
+          owned qty  × buy_price  (opportunity cost — could sell them)
+          missing qty × sell_price (acquisition cost — must buy them)
+        """
+        return self.cost_owned + self.cost_to_buy
+
     @property
     def total_buy_cost(self) -> float:
-        """ISK to buy quantity_needed from the market (sell-order price)."""
+        """Worst-case cost: buy ALL quantity_needed at market sell price."""
         return self.quantity_needed * self.sell_price
 
     @property
@@ -77,13 +106,14 @@ class BOMNode:
     @property
     def make_cost(self) -> float:
         """
-        Recursive cost to manufacture this item.
-        Children with blueprints use their own make_cost; others use buy cost.
+        Recursive realistic cost to produce this item.
+        - Leaf nodes: owned qty at opportunity cost + missing qty at market buy price.
+        - Intermediate nodes with blueprints: recurse into their children.
         """
         if not self.children:
-            return self.total_buy_cost
+            return self.true_material_cost
         return sum(
-            (c.make_cost if (c.has_blueprint and c.children) else c.total_buy_cost)
+            (c.make_cost if (c.has_blueprint and c.children) else c.true_material_cost)
             for c in self.children
         )
 
@@ -197,10 +227,14 @@ def collect_raw_materials(root: BOMNode) -> list[dict]:
         qty = item["quantity_needed"]
         inv = item["inventory_qty"]
         shortage = max(0, qty - inv)
+        owned = min(qty, inv)
         item["shortage"] = shortage
         item["is_satisfied"] = shortage <= 0
-        item["total_cost"] = qty * item["sell_price"]
-        item["shortage_cost"] = shortage * item["sell_price"]
+        # True cost: owned at opportunity cost (buy price), missing at acquisition cost (sell price)
+        item["cost_owned"] = owned * item["buy_price"]
+        item["cost_to_buy"] = shortage * item["sell_price"]
+        item["total_cost"] = item["cost_owned"] + item["cost_to_buy"]
+        item["shortage_cost"] = shortage * item["sell_price"]   # what you still need to spend
         item["total_volume"] = qty * item["volume_each"]
         item["shortage_volume"] = shortage * item["volume_each"]
         result.append(item)
