@@ -690,6 +690,7 @@ async def resolve_locations(db: AsyncSession, character_id: int | None = None) -
 
         for struct_id in structure_ids:
             name = None
+            solar_system_id: int | None = None
             non_403_errs: list[str] = []
             for char_id in all_char_ids:
                 esi = ESIClient(db)
@@ -699,6 +700,7 @@ async def resolve_locations(db: AsyncSession, character_id: int | None = None) -
                         character_id=char_id,
                     )
                     name = data.get("name")
+                    solar_system_id = data.get("solar_system_id")
                     if name:
                         break
                 except Exception as exc:
@@ -721,6 +723,7 @@ async def resolve_locations(db: AsyncSession, character_id: int | None = None) -
                 location_id=struct_id,
                 name=name or f"Unknown Structure ({struct_id})",
                 location_type="structure",
+                solar_system_id=solar_system_id,
                 last_updated=datetime.utcnow(),
             ))
             count += 1
@@ -783,6 +786,97 @@ async def resolve_locations(db: AsyncSession, character_id: int | None = None) -
 
 
 # ---------------------------------------------------------------------------
+# Resolve blueprint locations → solar_system_id
+# ---------------------------------------------------------------------------
+
+
+async def sync_blueprint_locations(db: AsyncSession) -> int:
+    """
+    For every unique location_id referenced in the blueprints table, look up
+    the solar_system_id and cache it in the Location table.
+
+    - NPC stations (id < 1e12): GET /universe/stations/{id}/ → system_id  (no auth)
+    - Player structures (id ≥ 1e12): already handled by resolve_locations;
+      solar_system_id should already be set from the structure response.
+
+    Returns count of new/updated location rows.
+    """
+    import asyncio
+    import httpx
+
+    from app.models.location import Location
+
+    # All unique location_ids used by blueprints
+    bp_locs = [
+        r[0]
+        for r in (await db.execute(select(Blueprint.location_id).distinct())).fetchall()
+    ]
+    if not bp_locs:
+        return 0
+
+    # Check which ones already have solar_system_id resolved
+    existing = {
+        r[0]: r[1]
+        for r in (
+            await db.execute(
+                select(Location.location_id, Location.solar_system_id)
+                .where(Location.location_id.in_(bp_locs))
+            )
+        ).fetchall()
+    }
+
+    # Only need to fetch NPC stations (id < 1e12) without a solar_system_id yet
+    to_fetch = [
+        loc_id for loc_id in bp_locs
+        if loc_id < 1_000_000_000_000 and existing.get(loc_id) is None
+    ]
+    if not to_fetch:
+        return 0
+
+    count = 0
+
+    async def fetch_station(client: httpx.AsyncClient, station_id: int) -> None:
+        nonlocal count
+        try:
+            resp = await client.get(
+                f"https://esi.evetech.net/latest/universe/stations/{station_id}/",
+                headers={"Accept": "application/json"},
+                timeout=15.0,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                sys_id = data.get("system_id")
+                name = data.get("name", f"Station {station_id}")
+                # Upsert into Location
+                loc = await db.get(Location, station_id)
+                if loc:
+                    loc.solar_system_id = sys_id
+                    loc.name = name
+                    loc.location_type = "station"
+                else:
+                    db.add(Location(
+                        location_id=station_id,
+                        name=name,
+                        location_type="station",
+                        solar_system_id=sys_id,
+                        last_updated=datetime.utcnow(),
+                    ))
+                count += 1
+        except Exception as exc:
+            print(f"[BPLOC] station {station_id} lookup failed: {exc}")
+
+    async with httpx.AsyncClient() as client:
+        # Concurrently fetch up to 20 at a time
+        for i in range(0, len(to_fetch), 20):
+            batch = to_fetch[i : i + 20]
+            await asyncio.gather(*[fetch_station(client, sid) for sid in batch])
+
+    if count:
+        await db.commit()
+    return count
+
+
+# ---------------------------------------------------------------------------
 # Full sync for a single character
 # ---------------------------------------------------------------------------
 
@@ -826,6 +920,14 @@ async def sync_character_all(db: AsyncSession, character_id: int) -> dict:
             )
     except Exception as exc:
         errors["locations"] = str(exc)
+
+    # Resolve blueprint station locations → solar_system_id for cost index lookup
+    try:
+        bp_locs = await sync_blueprint_locations(db)
+        if bp_locs:
+            results["blueprint_locations"] = bp_locs
+    except Exception as exc:
+        errors["blueprint_locations"] = str(exc)
 
     # Update last_synced timestamp
     result = await db.execute(select(Character).where(Character.character_id == character_id))

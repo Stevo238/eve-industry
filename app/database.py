@@ -31,6 +31,7 @@ async def init_db():
         for sql in [
             "ALTER TABLE market_prices ADD COLUMN buy_price REAL",
             "ALTER TABLE market_prices ADD COLUMN sell_price REAL",
+            "ALTER TABLE locations ADD COLUMN solar_system_id INTEGER",
         ]:
             try:
                 await conn.execute(__import__("sqlalchemy").text(sql))

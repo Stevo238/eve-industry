@@ -88,9 +88,10 @@
 
     <h3 class="settings-heading" style="margin-top:24px">Industry Facility</h3>
     <p class="settings-hint">
-      The system where you install manufacturing and reaction jobs. Used to look up
-      the <strong>system cost index</strong> — the main variable component of job installation fees.
-      Sync your characters to populate cost index data.
+      The BOM detail page auto-detects the manufacturing system from where each blueprint
+      is physically stored (resolved during sync). The system below is used as a
+      <strong>fallback</strong> when the blueprint location hasn't been resolved yet,
+      and on the Manufacturing overview page.
     </p>
     <div style="display:grid; gap:16px">
       <div class="form-row">

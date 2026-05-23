@@ -16,4 +16,6 @@ class Location(Base):
     # "station" | "structure" | "solar_system" | "unknown"
     location_type: Mapped[str] = mapped_column(String(20))
     solar_system_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Solar system ID — populated for stations and structures so we can look up cost indexes
+    solar_system_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_updated: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

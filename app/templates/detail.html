@@ -140,6 +140,7 @@
           {%- else %}0% idx{% endif %}
           + 4% SCC
           {%- if facility_tax_pct > 0 %} + {{ "{:.2f}".format(facility_tax_pct) }}% facility{% endif %})
+          {% if detected_system_name %}· {{ detected_system_name }}{% if auto_detected %} ✓{% endif %}{% endif %}
         </span>
       </span>
       <span class="fin-amount text-muted">{{ isk(stats.total_job_cost) }} ISK</span>

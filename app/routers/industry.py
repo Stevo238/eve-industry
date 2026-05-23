@@ -13,9 +13,10 @@ from app.esi.sync import sync_blueprint_market_prices
 from app.models.blueprints import Blueprint
 from app.models.character import Character
 from app.models.industry import IndustryCostIndex, IndustryJob
+from app.models.location import Location
 from app.models.market import MarketPrice
 from app.models.settings import MARKET_HUBS
-from app.models.sde import SdeBlueprintProduct, SdeType
+from app.models.sde import SdeBlueprintProduct, SdeSolarSystem, SdeType
 from app.routers.settings import get_settings
 
 ACTIVITY_NAMES = {
@@ -254,6 +255,8 @@ async def detail_page(
     reaction_cost_index      = 0.0
     facility_tax_pct_cfg     = 0.0
     structure_role_bonus_cfg = 0.0
+    detected_system_name     = ""
+    auto_detected            = False
 
     if blueprint_item_id:
         selected_bp = next((bp for bp in all_blueprints if bp.item_id == blueprint_item_id), None)
@@ -298,9 +301,22 @@ async def detail_page(
             sales_tax_pct   = float(cfg.get("sales_tax_pct", "2.0") or 2.0)
             broker_fee_pct  = float(cfg.get("broker_fee_pct", "3.0") or 3.0)
 
-            mfg_system_id            = int(cfg.get("manufacturing_system_id", "30000142") or 30000142)
             facility_tax_pct_cfg     = float(cfg.get("facility_tax_pct", "0.0") or 0.0)
             structure_role_bonus_cfg = float(cfg.get("structure_role_bonus_pct", "0.0") or 0.0)
+
+            # Auto-detect manufacturing system from where the blueprint lives.
+            # Fall back to the manual setting if the location hasn't been resolved yet.
+            bp_location = await db.get(Location, selected_bp.location_id)
+            auto_system_id: int | None = bp_location.solar_system_id if bp_location else None
+
+            mfg_system_id = auto_system_id or int(
+                cfg.get("manufacturing_system_id", "30000142") or 30000142
+            )
+            auto_detected = auto_system_id is not None
+
+            # Resolve system name for display
+            sys_row = await db.get(SdeSolarSystem, mfg_system_id)
+            detected_system_name = sys_row.name if sys_row else str(mfg_system_id)
 
             # Look up system cost indexes (both manufacturing and reactions)
             mfg_ci = (await db.execute(
@@ -358,6 +374,8 @@ async def detail_page(
             "reaction_cost_index":      reaction_cost_index if blueprint_item_id else 0.0,
             "structure_role_bonus_pct": structure_role_bonus_cfg if blueprint_item_id else 0.0,
             "facility_tax_pct":         facility_tax_pct_cfg if blueprint_item_id else 0.0,
+            "detected_system_name":     detected_system_name,
+            "auto_detected":            auto_detected,
             "error": error,
         },
     )
