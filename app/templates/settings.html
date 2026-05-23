@@ -95,12 +95,37 @@
     <div style="display:grid; gap:16px">
       <div class="form-row">
         <label class="form-label">
-          Manufacturing system ID
-          <span class="form-hint">Solar system ID where you install jobs. Common: Jita = 30000142, Amarr = 30002187, Dodixie = 30002659. Find yours via <a href="https://evemaps.dotlan.net" target="_blank" style="color:var(--accent)">dotlan.net</a> or zkillboard.</span>
+          Manufacturing system
+          <span class="form-hint">
+            {% if solar_systems %}
+              Type to search — {{ solar_systems | length }} systems available from your last sync.
+            {% else %}
+              Sync your characters first to enable name search.
+            {% endif %}
+          </span>
         </label>
+        {% if solar_systems %}
+        <input list="solar-systems-list"
+               name="manufacturing_system_name"
+               value="{{ current_system_name }}"
+               placeholder="e.g. Jita"
+               class="form-input"
+               autocomplete="off">
+        <datalist id="solar-systems-list">
+          {% for sys in solar_systems %}
+          <option value="{{ sys.name }}"></option>
+          {% endfor %}
+        </datalist>
+        <div style="font-size:11px; color:var(--text-muted); margin-top:4px">
+          Stored system ID: <code style="font-size:11px">{{ settings.manufacturing_system_id }}</code>
+          {% if current_system_name %} · {{ current_system_name }}{% endif %}
+        </div>
+        {% else %}
         <input type="number" name="manufacturing_system_id"
                value="{{ settings.manufacturing_system_id }}"
-               min="1" class="form-input">
+               min="1" class="form-input"
+               placeholder="e.g. 30000142 (Jita)">
+        {% endif %}
       </div>
       <div class="form-row">
         <label class="form-label">

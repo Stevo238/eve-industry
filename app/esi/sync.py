@@ -428,6 +428,9 @@ async def sync_blueprint_market_prices(db: AsyncSession, region_id: int = 100000
 
 
 async def sync_industry_cost_indexes(db: AsyncSession) -> int:
+    import httpx
+    from app.models.sde import SdeSolarSystem
+
     esi = ESIClient(db)
     try:
         systems = await esi.get("/industry/systems/")
@@ -436,12 +439,15 @@ async def sync_industry_cost_indexes(db: AsyncSession) -> int:
 
     await db.execute(delete(IndustryCostIndex))
 
+    system_ids: list[int] = []
     count = 0
     for system in systems:
+        sys_id = system["solar_system_id"]
+        system_ids.append(sys_id)
         for index in system.get("cost_indices", []):
             db.add(
                 IndustryCostIndex(
-                    solar_system_id=system["solar_system_id"],
+                    solar_system_id=sys_id,
                     activity=index["activity"],
                     cost_index=index["cost_index"],
                     last_updated=datetime.utcnow(),
@@ -450,6 +456,27 @@ async def sync_industry_cost_indexes(db: AsyncSession) -> int:
             count += 1
 
     await db.commit()
+
+    # Resolve system IDs → names via the unauthenticated ESI universe/names endpoint
+    await db.execute(delete(SdeSolarSystem))
+    BATCH = 1000
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        for i in range(0, len(system_ids), BATCH):
+            batch = system_ids[i : i + BATCH]
+            resp = await client.post(
+                "https://esi.evetech.net/latest/universe/names/",
+                json=batch,
+                headers={"Accept": "application/json", "Content-Type": "application/json"},
+            )
+            if resp.status_code == 200:
+                for item in resp.json():
+                    if item.get("category") == "solar_system":
+                        db.add(SdeSolarSystem(
+                            solar_system_id=item["id"],
+                            name=item["name"],
+                        ))
+    await db.commit()
+
     return count
 
 

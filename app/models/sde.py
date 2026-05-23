@@ -89,6 +89,15 @@ class SdeBlueprintProduct(Base):
     probability: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
+class SdeSolarSystem(Base):
+    """Solar system names — populated when syncing industry cost indexes."""
+
+    __tablename__ = "sde_solar_systems"
+
+    solar_system_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), index=True)
+
+
 class SdeBlueprintSkill(Base):
     """Skills required by blueprint activities from blueprints.yaml."""
 
