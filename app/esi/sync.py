@@ -711,10 +711,11 @@ async def resolve_locations(db: AsyncSession, character_id: int | None = None) -
                     await esi.close()
 
             if not name:
-                struct_errors[struct_id] = non_403_errs
                 if non_403_errs:
+                    # Real errors (5xx, network, etc.) — surface these
+                    struct_errors[struct_id] = non_403_errs
                     print(f"[LOC] structure {struct_id} unresolved — unexpected errors: {non_403_errs}")
-                # 403-only failures are silent: structure is inaccessible, placeholder stored
+                # 403-only: no access to that structure — silent, placeholder stored
 
             db.add(Location(
                 location_id=struct_id,
