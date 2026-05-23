@@ -619,9 +619,7 @@ async def resolve_locations(db: AsyncSession, character_id: int | None = None) -
 
     cached = {r[0] for r in cached_rows if r[0] not in stale_ids}
     missing_set = {i for i in all_loc_ids if i not in cached}
-    print(f"[LOC] stale_deleted={len(stale_ids)} cached={len(cached)} missing={len(missing_set)}")
     if not missing_set:
-        print("[LOC] nothing to resolve, all cached")
         return 0, {}
 
     # KEY FIX: only treat a location as "item" if the ID actually exists as an
@@ -635,9 +633,7 @@ async def resolve_locations(db: AsyncSession, character_id: int | None = None) -
     real_loc_ids   = [i for i in missing_set if i not in item_type_loc_ids]
     structure_ids  = [i for i in real_loc_ids if i >= 1_000_000_000_000]
     public_ids     = [i for i in real_loc_ids if i <  1_000_000_000_000]
-    print(f"[LOC] structures={len(structure_ids)} public={len(public_ids)} item_chain={len(item_type_loc_ids)}")
-    if structure_ids:
-        print(f"[LOC] structure IDs to resolve: {structure_ids[:10]}")
+    # (diagnostic prints removed — 403s on private structures are expected and silent)
 
     count = 0
 
@@ -694,7 +690,7 @@ async def resolve_locations(db: AsyncSession, character_id: int | None = None) -
 
         for struct_id in structure_ids:
             name = None
-            errs: list[str] = []
+            non_403_errs: list[str] = []
             for char_id in all_char_ids:
                 esi = ESIClient(db)
                 try:
@@ -703,18 +699,22 @@ async def resolve_locations(db: AsyncSession, character_id: int | None = None) -
                         character_id=char_id,
                     )
                     name = data.get("name")
-                    print(f"[LOC] structure {struct_id} via char {char_id} → {name!r}")
                     if name:
                         break
                 except Exception as exc:
-                    errs.append(f"char {char_id}: {exc}")
-                    print(f"[LOC] structure {struct_id} via char {char_id} → ERROR: {exc}")
+                    exc_str = str(exc)
+                    if "403" not in exc_str:
+                        # 403 = no docking access — expected and silent.
+                        # Log anything else (5xx, network errors, etc.).
+                        non_403_errs.append(f"char {char_id}: {exc_str[:120]}")
                 finally:
                     await esi.close()
 
             if not name:
-                struct_errors[struct_id] = errs
-                print(f"[LOC] structure {struct_id} UNRESOLVED — storing placeholder")
+                struct_errors[struct_id] = non_403_errs
+                if non_403_errs:
+                    print(f"[LOC] structure {struct_id} unresolved — unexpected errors: {non_403_errs}")
+                # 403-only failures are silent: structure is inaccessible, placeholder stored
 
             db.add(Location(
                 location_id=struct_id,
