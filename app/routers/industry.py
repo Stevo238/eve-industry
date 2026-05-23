@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.engine.bom import build_bom_tree, build_product_blueprint_map, collect_raw_materials, collect_stats
-from app.engine.manufacturing import get_all_manufacturing_options, get_asset_inventory
+from app.engine.manufacturing import StructureConfig, get_all_manufacturing_options, get_asset_inventory
 from app.esi.sync import sync_blueprint_market_prices
 from app.models.blueprints import Blueprint
 from app.models.character import Character
@@ -17,7 +17,55 @@ from app.models.location import Location
 from app.models.market import MarketPrice
 from app.models.settings import MARKET_HUBS
 from app.models.sde import SdeBlueprintProduct, SdeSolarSystem, SdeType
+from app.models.structures import ManufacturingStructure, role_bonus_from_type_id
 from app.routers.settings import get_settings
+
+
+async def _build_structures_map(db: AsyncSession) -> dict[int, StructureConfig]:
+    """Build {structure_location_id: StructureConfig} for all configured manufacturing structures."""
+    rows = (await db.execute(select(ManufacturingStructure))).scalars().all()
+    result: dict[int, StructureConfig] = {}
+    for s in rows:
+        if not s.structure_id:
+            continue
+        loc = await db.get(Location, s.structure_id)
+        if not loc:
+            continue
+        solar_system_id = loc.solar_system_id
+        type_id = loc.type_id
+        role_bonus = role_bonus_from_type_id(type_id)
+
+        cost_index = 0.0
+        reaction_cost_idx = 0.0
+        sys_name = ""
+        if solar_system_id:
+            mfg_ci = (await db.execute(
+                select(IndustryCostIndex).where(
+                    IndustryCostIndex.solar_system_id == solar_system_id,
+                    IndustryCostIndex.activity == "manufacturing",
+                )
+            )).scalar_one_or_none()
+            rxn_ci = (await db.execute(
+                select(IndustryCostIndex).where(
+                    IndustryCostIndex.solar_system_id == solar_system_id,
+                    IndustryCostIndex.activity == "reaction",
+                )
+            )).scalar_one_or_none()
+            cost_index = mfg_ci.cost_index if mfg_ci else 0.0
+            reaction_cost_idx = rxn_ci.cost_index if rxn_ci else 0.0
+            sys_row = await db.get(SdeSolarSystem, solar_system_id)
+            sys_name = sys_row.name if sys_row else str(solar_system_id)
+
+        result[s.structure_id] = StructureConfig(
+            label=s.label,
+            system_cost_index=cost_index,
+            reaction_cost_index=reaction_cost_idx,
+            role_bonus_pct=role_bonus,
+            me_rig_bonus=s.me_rig_bonus_pct / 100.0,
+            system_name=sys_name,
+        )
+    return result
+
 
 ACTIVITY_NAMES = {
     1: "Manufacturing",
@@ -111,7 +159,14 @@ async def _manufacturing_shell_context(request: Request, db: AsyncSession) -> di
             IndustryCostIndex.activity == "manufacturing",
         )
     )).scalar_one_or_none()
+    rxn_ci = (await db.execute(
+        select(IndustryCostIndex).where(
+            IndustryCostIndex.solar_system_id == mfg_system_id,
+            IndustryCostIndex.activity == "reaction",
+        )
+    )).scalar_one_or_none()
     mfg_cost_index = mfg_ci.cost_index if mfg_ci else 0.0
+    reaction_cost_index = rxn_ci.cost_index if rxn_ci else 0.0
 
     price_row = (
         await db.execute(
@@ -130,6 +185,7 @@ async def _manufacturing_shell_context(request: Request, db: AsyncSession) -> di
         "sales_tax_pct": sales_tax_pct,
         "broker_fee_pct": broker_fee_pct,
         "mfg_cost_index": mfg_cost_index,
+        "reaction_cost_index": reaction_cost_index,
         "facility_tax_pct_mfg": facility_tax_pct_mfg,
         "structure_role_bonus_mfg": structure_role_bonus_mfg,
         "has_order_prices": price_row is not None,
@@ -141,7 +197,6 @@ async def manufacturing_page(
     request: Request,
     runs: int = 1,
     buildable_only: bool = False,
-    structure_me: float = 0.0,
     activity_filter: str = "all",
     db: AsyncSession = Depends(get_db),
 ):
@@ -151,7 +206,6 @@ async def manufacturing_page(
         **ctx,
         "runs": runs,
         "buildable_only": buildable_only,
-        "structure_me": structure_me,
         "activity_filter": activity_filter,
     })
 
@@ -161,7 +215,6 @@ async def manufacturing_results(
     request: Request,
     runs: int = 1,
     buildable_only: bool = False,
-    structure_me: float = 0.0,
     activity_filter: str = "all",
     db: AsyncSession = Depends(get_db),
 ):
@@ -174,20 +227,21 @@ async def manufacturing_results(
     sde_error = ""
     if character_ids:
         try:
+            structures_by_loc = await _build_structures_map(db)
             options = await get_all_manufacturing_options(
                 db,
                 character_ids=character_ids,
                 runs=runs,
-                structure_me_bonus=structure_me / 100.0,
                 buildable_only=buildable_only,
                 activity_filter=activity_filter,
                 inbound_isk_per_m3=ctx["inbound_isk_m3"],
                 outbound_isk_per_m3=ctx["outbound_isk_m3"],
                 sales_tax_pct=ctx["sales_tax_pct"],
-                broker_fee_pct=ctx["broker_fee_pct"],
                 system_cost_index=ctx["mfg_cost_index"],
+                reaction_cost_index=ctx["reaction_cost_index"],
                 structure_role_bonus_pct=ctx["structure_role_bonus_mfg"],
                 facility_tax_pct=ctx["facility_tax_pct_mfg"],
+                structures_by_loc=structures_by_loc,
             )
         except Exception:
             import traceback
@@ -199,7 +253,6 @@ async def manufacturing_results(
         "options": options,
         "runs": runs,
         "buildable_only": buildable_only,
-        "structure_me": structure_me,
         "activity_filter": activity_filter,
         "sde_available": sde_available,
         "sde_error": sde_error,
@@ -269,12 +322,18 @@ async def detail_page(
     blueprint_item_id: int | None = None,
     runs: int = 1,
     structure_me: float = 0.0,
+    structure_override_id: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     bp_result = await db.execute(select(Blueprint).order_by(Blueprint.type_id))
     all_blueprints = bp_result.scalars().all()
 
     blueprint_map, display_list = await build_product_blueprint_map(db, all_blueprints)
+
+    override_id: int | None = int(structure_override_id) if structure_override_id else None
+
+    # Load all configured structures for the override dropdown
+    configured_structures = (await db.execute(select(ManufacturingStructure).order_by(ManufacturingStructure.label))).scalars().all()
 
     tree = None
     stats = None
@@ -285,8 +344,11 @@ async def detail_page(
     reaction_cost_index      = 0.0
     facility_tax_pct_cfg     = 0.0
     structure_role_bonus_cfg = 0.0
+    structure_me_rig         = 0.0
     detected_system_name     = ""
     auto_detected            = False
+    active_structure_label   = ""
+    active_structure_is_override = False
 
     if blueprint_item_id:
         selected_bp = next((bp for bp in all_blueprints if bp.item_id == blueprint_item_id), None)
@@ -331,18 +393,41 @@ async def detail_page(
             sales_tax_pct   = float(cfg.get("sales_tax_pct", "2.0") or 2.0)
             broker_fee_pct  = float(cfg.get("broker_fee_pct", "3.0") or 3.0)
 
-            facility_tax_pct_cfg     = float(cfg.get("facility_tax_pct", "0.0") or 0.0)
-            structure_role_bonus_cfg = float(cfg.get("structure_role_bonus_pct", "0.0") or 0.0)
+            facility_tax_pct_cfg = float(cfg.get("facility_tax_pct", "0.0") or 0.0)
 
-            # Auto-detect manufacturing system from where the blueprint lives.
-            # Fall back to the manual setting if the location hasn't been resolved yet.
-            bp_location = await db.get(Location, selected_bp.location_id)
-            auto_system_id: int | None = bp_location.solar_system_id if bp_location else None
+            # Structure resolution priority:
+            # 1. User override (structure_override_id query param)
+            # 2. Auto-detect: blueprint location_id matches a configured ManufacturingStructure
+            # 3. Auto-detect: blueprint location's solar_system_id for cost index
+            # 4. Global fallback settings
 
-            mfg_system_id = auto_system_id or int(
-                cfg.get("manufacturing_system_id", "30000142") or 30000142
-            )
-            auto_detected = auto_system_id is not None
+            override_struct = await db.get(ManufacturingStructure, override_id) if override_id else None
+            auto_struct = None
+            if not override_struct:
+                for s in configured_structures:
+                    if s.structure_id and s.structure_id == selected_bp.location_id:
+                        auto_struct = s
+                        break
+
+            active_struct = override_struct or auto_struct
+            active_structure_is_override = override_struct is not None
+
+            if active_struct and active_struct.structure_id:
+                struct_loc = await db.get(Location, active_struct.structure_id)
+                mfg_system_id = struct_loc.solar_system_id if struct_loc else int(cfg.get("manufacturing_system_id", "30000142") or 30000142)
+                structure_role_bonus_cfg = role_bonus_from_type_id(struct_loc.type_id if struct_loc else None)
+                structure_me_rig = active_struct.me_rig_bonus_pct
+                active_structure_label = active_struct.label
+                auto_detected = True
+            else:
+                # Fall back: use blueprint's solar system for cost index
+                bp_location = await db.get(Location, selected_bp.location_id)
+                auto_system_id: int | None = bp_location.solar_system_id if bp_location else None
+                mfg_system_id = auto_system_id or int(cfg.get("manufacturing_system_id", "30000142") or 30000142)
+                structure_role_bonus_cfg = float(cfg.get("structure_role_bonus_pct", "0.0") or 0.0)
+                structure_me_rig = 0.0
+                active_structure_label = ""
+                auto_detected = auto_system_id is not None
 
             # Resolve system name for display
             sys_row = await db.get(SdeSolarSystem, mfg_system_id)
@@ -364,11 +449,14 @@ async def detail_page(
             mfg_cost_index      = mfg_ci.cost_index if mfg_ci else 0.0
             reaction_cost_index = reaction_ci.cost_index if reaction_ci else 0.0
 
+            # Effective ME bonus: structure rig + manual slider (for ad-hoc what-if on top)
+            effective_me_bonus = (structure_me_rig + structure_me) / 100.0
+
             try:
                 tree = await build_bom_tree(
                     db, product_type_id, total_qty,
                     blueprint_map, inventory, prices,
-                    structure_me_bonus=structure_me / 100.0,
+                    structure_me_bonus=effective_me_bonus,
                     inbound_isk_per_m3=inbound_isk_m3,
                     outbound_isk_per_m3=outbound_isk_m3,
                     sales_tax_pct=sales_tax_pct,
@@ -404,8 +492,13 @@ async def detail_page(
             "reaction_cost_index":      reaction_cost_index if blueprint_item_id else 0.0,
             "structure_role_bonus_pct": structure_role_bonus_cfg if blueprint_item_id else 0.0,
             "facility_tax_pct":         facility_tax_pct_cfg if blueprint_item_id else 0.0,
+            "structure_me_rig":         structure_me_rig,
             "detected_system_name":     detected_system_name,
             "auto_detected":            auto_detected,
+            "active_structure_label":   active_structure_label,
+            "active_structure_is_override": active_structure_is_override,
+            "configured_structures":    configured_structures,
+            "structure_override_id":    override_id,
             "error": error,
         },
     )

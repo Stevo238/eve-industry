@@ -37,8 +37,24 @@
       <label>Runs:
         <input type="number" name="runs" value="{{ runs }}" min="1" max="10000" style="width:72px">
       </label>
-      <label>Structure ME (%):
-        <input type="number" name="structure_me" value="{{ structure_me }}" min="0" max="10" step="0.1" style="width:64px">
+      {% if configured_structures %}
+      <div class="form-row" style="min-width:180px">
+        <label class="form-label" style="font-size:11px">Structure
+          <span class="form-hint">Auto-detect from blueprint location, or override</span>
+        </label>
+        <select name="structure_override_id"
+                style="background:var(--bg-base); border:1px solid var(--border); border-radius:var(--radius); color:var(--text); padding:5px 8px; font-size:12px">
+          <option value="">Auto-detect</option>
+          {% for s in configured_structures %}
+          <option value="{{ s.id }}" {% if structure_override_id == s.id %}selected{% endif %}>
+            {{ s.label }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      <label title="Additional ME bonus on top of the structure's rig (use for what-if scenarios)">Extra ME (%):
+        <input type="number" name="structure_me" value="{{ structure_me }}" min="0" max="10" step="0.1" style="width:56px">
       </label>
       <button type="submit" class="btn btn-primary">Analyse</button>
     </div>
@@ -69,7 +85,14 @@
     </div>
     <div class="fin-doc-meta">
       <span>{{ runs }} run{{ 's' if runs != 1 }} · ×{{ qty(tree.quantity_needed) }} units</span>
-      {% if structure_me > 0 %}<span>Structure ME {{ structure_me }}%</span>{% endif %}
+      {% if active_structure_label %}
+        <span title="{{ 'Override' if active_structure_is_override else 'Auto-detected' }}">
+          🏭 {{ active_structure_label }}{% if active_structure_is_override %} ⬤{% endif %}
+        </span>
+      {% endif %}
+      {% if structure_me_rig > 0 or structure_me > 0 %}
+        <span>ME rig {{ structure_me_rig }}%{% if structure_me > 0 %} +{{ structure_me }}% extra{% endif %}</span>
+      {% endif %}
       <span>⏱ {{ time_fmt(stats.total_job_time) }} total</span>
       <span>{{ stats.intermediate_count }} sub-job{{ 's' if stats.intermediate_count != 1 }}</span>
     </div>
@@ -157,7 +180,9 @@
     {% set gross_profit    = stats.revenue - true_cogs %}
     {% set broker_fee_cost = stats.revenue * broker_fee_pct / 100 %}
     {% set sales_tax_cost  = stats.revenue * sales_tax_pct / 100 %}
-    {% set total_fees      = stats.outbound_shipping + broker_fee_cost + sales_tax_cost %}
+    {# Instant-sell-to-buy-orders model: revenue uses buy price, no broker fee charged.
+       Broker fee shown below as informational only (applies if you list a sell order). #}
+    {% set total_fees      = stats.outbound_shipping + sales_tax_cost %}
     {% set net_profit      = gross_profit - total_fees %}
 
     <div class="fin-rule fin-rule--double"></div>
@@ -176,12 +201,6 @@
       <span class="fin-amount text-muted">{{ isk(stats.outbound_shipping) }} ISK</span>
     </div>
     {% endif %}
-    {% if broker_fee_pct > 0 %}
-    <div class="fin-line">
-      <span class="fin-line-label">Broker fee ({{ broker_fee_pct }}%)</span>
-      <span class="fin-amount text-muted">{{ isk(broker_fee_cost) }} ISK</span>
-    </div>
-    {% endif %}
     {% if sales_tax_pct > 0 %}
     <div class="fin-line">
       <span class="fin-line-label">Sales tax ({{ sales_tax_pct }}%)</span>
@@ -193,6 +212,14 @@
     <div class="fin-line fin-line--total">
       <span class="fin-line-label">Total selling fees</span>
       <span class="fin-amount text-muted">{{ isk(total_fees) }} ISK</span>
+    </div>
+    {% endif %}
+    {% if broker_fee_pct > 0 %}
+    <div class="fin-line" style="margin-top:4px">
+      <span class="fin-line-label" style="color:var(--text-muted); font-size:11px">
+        Broker fee {{ broker_fee_pct }}% <em>(if listing sell order — not included above)</em>
+      </span>
+      <span class="fin-amount text-muted" style="font-size:11px">{{ isk(broker_fee_cost) }} ISK</span>
     </div>
     {% endif %}
 

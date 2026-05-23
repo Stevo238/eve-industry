@@ -30,6 +30,17 @@ from app.models.sde import (
     SdeType,
 )
 
+@dataclass
+class StructureConfig:
+    """Resolved per-structure parameters used by the analysis engine."""
+    label: str
+    system_cost_index: float       # manufacturing cost index
+    reaction_cost_index: float     # reaction cost index
+    role_bonus_pct: float
+    me_rig_bonus: float            # fraction, e.g. 0.02 for 2%
+    system_name: str = ""
+
+
 ACTIVITY_MANUFACTURING = 1
 ACTIVITY_REACTIONS = 11
 SUPPORTED_ACTIVITIES = [ACTIVITY_MANUFACTURING, ACTIVITY_REACTIONS]
@@ -113,10 +124,9 @@ class ManufacturingOption:
     inbound_shipping_cost: float = 0.0   # inbound_volume × inbound ISK/m³
     outbound_shipping_cost: float = 0.0  # product volume × outbound ISK/m³
 
-    # EVE market fees (applied when selling product via market order)
+    # EVE market fees — instant-sell-to-buy-orders model (no broker fee / no listing)
     manufacturing_fee: float = 0.0
     sales_tax: float = 0.0
-    broker_fee: float = 0.0
 
     # ── Summary totals ───────────────────────────────────────────────────────
     @property
@@ -126,7 +136,6 @@ class ManufacturingOption:
 
     @property
     def total_cost(self) -> float:
-        # broker_fee is always 0 for instant-sale-to-buy-order transactions
         return (
             self.total_material_cost
             + self.inbound_shipping_cost
@@ -184,6 +193,11 @@ class ManufacturingOption:
         if self.profit_delta > 0:
             return "manufacture"
         return "sell_materials"
+
+    # ── Structure context ────────────────────────────────────────────────────
+    structure_label: str = ""
+    structure_is_fallback: bool = False
+    structure_system_name: str = ""
 
     # Legacy alias used in old template code
     @property
@@ -253,8 +267,8 @@ async def analyse_blueprint(
     inbound_isk_per_m3: float = 0.0,
     outbound_isk_per_m3: float = 0.0,
     sales_tax_pct: float = 2.0,
-    broker_fee_pct: float = 3.0,
     system_cost_index: float = 0.0,
+    reaction_cost_index: float = 0.0,
     structure_role_bonus_pct: float = 0.0,
     facility_tax_pct: float = 0.0,
 ) -> "ManufacturingOption | None":
@@ -403,19 +417,19 @@ async def analyse_blueprint(
     outbound_volume = prod_volume * qty_produced
     outbound_shipping = outbound_volume * outbound_isk_per_m3
 
-    # Sales tax applies when selling to buy orders (instant sale, no listing).
-    # Broker fee is 0 — we are NOT placing a sell order.
+    # Sales tax on instant sale to buy orders. No broker fee — no sell order listing.
     gross = product_buy_price * qty_produced
     sales_tax = gross * (sales_tax_pct / 100.0)
-    broker_fee = 0.0  # no order listing
 
     # Industry job cost (full EVE formula):
     #   Job Gross Cost = EIV × cost_index × (1 − structure_role_bonus)
     #   SCC Surcharge  = EIV × 4%   (flat CCP tax, NOT reduced by role bonus)
     #   Facility Tax   = EIV × facility_tax%
     #   Total Job Cost = Job Gross Cost + SCC Surcharge + Facility Tax
+    # Reactions use the reaction cost index, not the manufacturing one.
     SCC_SURCHARGE = 0.04
-    ci_after_bonus = system_cost_index * (1.0 - structure_role_bonus_pct / 100.0)
+    ci = reaction_cost_index if activity_id == ACTIVITY_REACTIONS else system_cost_index
+    ci_after_bonus = ci * (1.0 - structure_role_bonus_pct / 100.0)
     rate = ci_after_bonus + SCC_SURCHARGE + facility_tax_pct / 100.0
     manufacturing_fee = manufacturing_fee * rate
 
@@ -447,7 +461,6 @@ async def analyse_blueprint(
         outbound_shipping_cost=outbound_shipping,
         manufacturing_fee=manufacturing_fee,
         sales_tax=sales_tax,
-        broker_fee=broker_fee,
     )
 
 
@@ -461,10 +474,11 @@ async def get_all_manufacturing_options(
     inbound_isk_per_m3: float = 0.0,
     outbound_isk_per_m3: float = 0.0,
     sales_tax_pct: float = 2.0,
-    broker_fee_pct: float = 3.0,
     system_cost_index: float = 0.0,
+    reaction_cost_index: float = 0.0,
     structure_role_bonus_pct: float = 0.0,
     facility_tax_pct: float = 0.0,
+    structures_by_loc: "dict[int, StructureConfig] | None" = None,
 ) -> list[ManufacturingOption]:
     stmt = select(Blueprint)
     if character_ids:
@@ -474,21 +488,43 @@ async def get_all_manufacturing_options(
 
     options: list[ManufacturingOption] = []
     for bp in blueprints:
+        # Per-blueprint structure resolution: match on location_id
+        bp_struct = (structures_by_loc or {}).get(bp.location_id)
+        if bp_struct:
+            bp_cost_index          = bp_struct.system_cost_index
+            bp_reaction_cost_index = bp_struct.reaction_cost_index
+            bp_role_bonus          = bp_struct.role_bonus_pct
+            bp_me_bonus            = bp_struct.me_rig_bonus
+            bp_label               = bp_struct.label
+            bp_is_fallback         = False
+            bp_sys_name            = bp_struct.system_name
+        else:
+            bp_cost_index          = system_cost_index
+            bp_reaction_cost_index = reaction_cost_index
+            bp_role_bonus          = structure_role_bonus_pct
+            bp_me_bonus            = structure_me_bonus
+            bp_label               = ""
+            bp_is_fallback         = True
+            bp_sys_name            = ""
+
         opt = await analyse_blueprint(
             db, bp,
             runs=runs,
             character_ids=character_ids,
-            structure_me_bonus=structure_me_bonus,
+            structure_me_bonus=bp_me_bonus,
             inbound_isk_per_m3=inbound_isk_per_m3,
             outbound_isk_per_m3=outbound_isk_per_m3,
             sales_tax_pct=sales_tax_pct,
-            broker_fee_pct=broker_fee_pct,
-            system_cost_index=system_cost_index,
-            structure_role_bonus_pct=structure_role_bonus_pct,
+            system_cost_index=bp_cost_index,
+            reaction_cost_index=bp_reaction_cost_index,
+            structure_role_bonus_pct=bp_role_bonus,
             facility_tax_pct=facility_tax_pct,
         )
         if opt is None:
             continue
+        opt.structure_label       = bp_label
+        opt.structure_is_fallback = bp_is_fallback
+        opt.structure_system_name = bp_sys_name
         if buildable_only and not opt.can_build_now:
             continue
         if activity_filter == "manufacturing" and opt.activity_label != "Manufacturing":

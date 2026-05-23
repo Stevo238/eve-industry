@@ -19,6 +19,7 @@
         <tr>
           <th>Product</th>
           <th>Blueprint</th>
+          <th>Structure</th>
           <th>Type</th>
           <th style="text-align:center">ME</th>
           <th style="text-align:center">Runs</th>
@@ -47,6 +48,16 @@
             <span>ME{{ opt.blueprint_me }} ·
             {% for char in characters %}{% if char.character_id == opt.character_id %}{{ char.name }}{% endif %}{% endfor %}
             </span>
+          </td>
+          <td style="font-size:11px; white-space:nowrap">
+            {% if opt.structure_is_fallback %}
+              <span style="color:var(--warning)" title="No matching structure configured — using global fallback settings">⚠ Fallback</span>
+            {% else %}
+              <span style="color:var(--text)">{{ opt.structure_label }}</span>
+              {% if opt.structure_system_name %}
+                <div style="font-size:10px; color:var(--text-muted)">{{ opt.structure_system_name }}</div>
+              {% endif %}
+            {% endif %}
           </td>
           <td style="white-space:nowrap">
             {% if opt.activity_label == 'Reaction' %}

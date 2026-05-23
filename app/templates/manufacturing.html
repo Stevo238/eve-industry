@@ -46,9 +46,6 @@
     <label>Runs:
       <input type="number" name="runs" value="{{ runs }}" min="1" max="10000" style="width:72px">
     </label>
-    <label>Structure ME (%):
-      <input type="number" name="structure_me" value="{{ structure_me }}" min="0" max="10" step="0.1" style="width:64px">
-    </label>
     <label>Activity:
       <select name="activity_filter" style="width:140px">
         <option value="all" {% if activity_filter == 'all' %}selected{% endif %}>All</option>

@@ -22,7 +22,7 @@ async def get_db():
 
 async def init_db():
     # Import all models so they register with Base.metadata
-    from app.models import assets, blueprints, character, industry, location, market, sde, settings  # noqa: F401
+    from app.models import assets, blueprints, character, industry, location, market, sde, settings, structures  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -32,6 +32,7 @@ async def init_db():
             "ALTER TABLE market_prices ADD COLUMN buy_price REAL",
             "ALTER TABLE market_prices ADD COLUMN sell_price REAL",
             "ALTER TABLE locations ADD COLUMN solar_system_id INTEGER",
+            "ALTER TABLE locations ADD COLUMN type_id INTEGER",
         ]:
             try:
                 await conn.execute(__import__("sqlalchemy").text(sql))

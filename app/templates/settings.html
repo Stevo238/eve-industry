@@ -11,6 +11,13 @@
 {% if request.query_params.get('saved') %}
 <div class="alert alert-success">Settings saved.</div>
 {% endif %}
+{% set _resolved = request.query_params.get('resolved') %}
+{% set _linked = request.query_params.get('linked') %}
+{% if _resolved is not none and _resolved != '' %}
+<div class="alert alert-success" id="resolved-alert">
+  Structure resolution complete — {{ _resolved }} location(s) updated{% if _linked and _linked != '0' %}, {{ _linked }} structure row(s) auto-linked{% endif %}.
+</div>
+{% endif %}
 
 <form method="post" action="/settings">
   <div class="card" style="max-width:640px">
@@ -130,8 +137,8 @@
       </div>
       <div class="form-row">
         <label class="form-label">
-          Structure role bonus (%)
-          <span class="form-hint">Reduction on the cost-index component only (NOT on SCC surcharge or facility tax). Presets: 0% NPC station, 15% Raitaru / Azbel, 20% Sotiyo.</span>
+          Structure role bonus (%) — global fallback
+          <span class="form-hint">Used when a blueprint's location doesn't match any structure in the table below. Reduction on cost-index only. 0% = NPC station, 15% = Raitaru/Azbel, 20% = Sotiyo.</span>
         </label>
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
           <input type="number" name="structure_role_bonus_pct"
@@ -162,4 +169,131 @@
     </div>
   </div>
 </form>
+
+{# ── Manufacturing Structures ──────────────────────────────────────────────── #}
+
+{# Location lookup map for JS auto-fill: name → {id, is_structure} #}
+<script>
+const _bpLocs = {
+  {% for loc in bp_locations %}"{{ loc.name | replace('"', '\\"') }}": {"id": {{ loc.location_id }}, "is_structure": {{ 'true' if loc.is_structure else 'false' }}},
+  {% endfor %}
+};
+function _fillStructId(labelInput, idFieldId) {
+  const loc = _bpLocs[labelInput.value];
+  const idField = document.getElementById(idFieldId);
+  if (idField) idField.value = loc ? loc.id : '';
+}
+</script>
+
+<datalist id="bp-locations-list">
+  {% for loc in bp_locations %}<option value="{{ loc.name }}">{% endfor %}
+</datalist>
+
+<div class="card" style="max-width:960px; margin-top:24px" id="structures">
+  <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:4px">
+    <h3 class="settings-heading" style="margin:0">Manufacturing Structures</h3>
+    <form method="post" action="/settings/resolve-structures" style="margin:0"
+          onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Resolving…'">
+      <button type="submit" class="btn btn-sm">Re-resolve from ESI</button>
+    </form>
+  </div>
+  <p class="settings-hint">
+    One row per facility you actually build in. The app matches each blueprint's
+    stored location to a structure ID here and uses that row's bonuses instead of
+    the global fallback above. Role bonus is auto-detected from the structure type
+    after a sync; ME rig must be entered manually (ESI does not expose rig fittings).
+  </p>
+
+  {% if structures %}
+  <table style="width:100%; table-layout:fixed; margin-bottom:16px">
+    <colgroup>
+      <col style="width:42%">
+      <col style="width:11%">
+      <col style="width:32%">
+      <col style="width:15%">
+    </colgroup>
+    <thead>
+      <tr>
+        <th>Location (your BPs)</th>
+        <th>ME Rig %</th>
+        <th>Detected</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in structures %}
+      <tr>
+        <form method="post" action="/settings/structures/{{ s.id }}" style="display:contents">
+          <td>
+            <input type="text" name="label" value="{{ s.label }}"
+                   list="bp-locations-list" autocomplete="off"
+                   oninput="_fillStructId(this, 'struct_id_{{ s.id }}')"
+                   onchange="_fillStructId(this, 'struct_id_{{ s.id }}')"
+                   class="form-input" style="width:100%"
+                   placeholder="Search your BP locations…">
+            <input type="number" id="struct_id_{{ s.id }}" name="structure_id"
+                   value="{{ s.structure_id }}" style="display:none">
+          </td>
+          <td>
+            <input type="number" name="me_rig_bonus_pct" value="{{ s.me_rig_bonus_pct }}"
+                   min="0" max="10" step="0.01" class="form-input" style="width:100%">
+          </td>
+          <td style="font-size:12px; color:var(--text-muted)">
+            {%- if s.struct_type %}
+              <strong style="color:var(--text)">{{ s.struct_type }}</strong> → {{ s.role_bonus }}% role
+              {%- if s.system_name %}<br>{{ s.system_name }}{%- endif %}
+            {%- elif s.is_npc %}
+              <span style="color:var(--text-muted)">NPC station · 0% role bonus</span>
+              {%- if s.system_name %}<br>{{ s.system_name }}{%- endif %}
+            {%- elif s.structure_id %}
+              <span style="color:var(--warning)">⚠ Re-resolve from ESI or check character access</span>
+            {%- else %}
+              <span style="color:var(--warning)">⚠ No ID — re-pick from location list &amp; Save</span>
+            {%- endif %}
+          </td>
+          <td style="white-space:nowrap">
+            <button type="submit" class="btn btn-sm">Save</button>
+        </form>
+        <form method="post" action="/settings/structures/{{ s.id }}/delete" style="display:inline; margin-left:4px">
+            <button type="submit" class="btn btn-sm btn-ghost"
+                    onclick="return confirm('Delete {{ s.label }}?')">✕</button>
+        </form>
+          </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:var(--text-muted); font-size:13px; margin-bottom:16px">No structures configured yet.</p>
+  {% endif %}
+
+  <details {% if not structures %}open{% endif %}>
+    <summary class="btn btn-sm btn-ghost" style="cursor:pointer; display:inline-block">+ Add structure</summary>
+    <form method="post" action="/settings/structures" style="margin-top:12px">
+      <div style="display:grid; grid-template-columns:1fr auto auto auto; gap:8px; align-items:end">
+        <div>
+          <label class="form-label" style="font-size:11px">Location <span style="font-weight:400; color:var(--text-muted)">(search your BP locations)</span></label>
+          <input type="text" name="label" id="new_label"
+                 list="bp-locations-list" autocomplete="off"
+                 oninput="_fillStructId(this, 'new_struct_id')"
+                 onchange="_fillStructId(this, 'new_struct_id')"
+                 class="form-input"
+                 placeholder="{% if bp_locations %}Start typing a location name…{% else %}Sync first to see your BP locations{% endif %}"
+                 required>
+          <input type="number" id="new_struct_id" name="structure_id" style="display:none">
+        </div>
+        <div>
+          <label class="form-label" style="font-size:11px">ME Rig %</label>
+          <input type="number" name="me_rig_bonus_pct" value="0" min="0" max="10" step="0.01" class="form-input" style="max-width:80px">
+        </div>
+        <div style="padding-bottom:1px">
+          <button type="submit" class="btn btn-primary btn-sm">Add</button>
+        </div>
+      </div>
+      <div style="margin-top:6px; font-size:11px; color:var(--text-muted)">
+        T1 rig = 2%, T2 rig = 2.4% · For NPC stations leave ME rig at 0 and use the global fallback role bonus above.
+      </div>
+    </form>
+  </details>
+</div>
 {% endblock %}

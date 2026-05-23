@@ -591,7 +591,7 @@ async def resolve_locations(db: AsyncSession, character_id: int | None = None) -
     # the scope; now we try again with potentially fresher/re-authed tokens).
     cached_rows = (
         await db.execute(
-            select(Location.location_id, Location.name).where(
+            select(Location.location_id, Location.name, Location.type_id).where(
                 Location.location_id.in_(all_loc_ids)
             )
         )
@@ -603,12 +603,16 @@ async def resolve_locations(db: AsyncSession, character_id: int | None = None) -
     #   "Porpoise @ 1047213331825"
     #   "Location 1047213331825"
     # Any name containing a 12+ digit raw ID is treated as unresolved.
+    # Also catches player structures (id ≥ 1e12) that were resolved before the
+    # type_id column was added — they have a good name but NULL type_id.
     import re as _re
     _raw_id_pat = _re.compile(r'\d{12,}')
     stale_ids = {
         r[0]
         for r in cached_rows
-        if "Unknown Structure" in r[1] or _raw_id_pat.search(r[1])
+        if "Unknown Structure" in r[1]
+        or _raw_id_pat.search(r[1])
+        or (r[0] >= 1_000_000_000_000 and r[2] is None)
     }
     if stale_ids:
         from sqlalchemy import delete as sql_delete
@@ -691,6 +695,7 @@ async def resolve_locations(db: AsyncSession, character_id: int | None = None) -
         for struct_id in structure_ids:
             name = None
             solar_system_id: int | None = None
+            struct_type_id: int | None = None
             non_403_errs: list[str] = []
             for char_id in all_char_ids:
                 esi = ESIClient(db)
@@ -701,6 +706,7 @@ async def resolve_locations(db: AsyncSession, character_id: int | None = None) -
                     )
                     name = data.get("name")
                     solar_system_id = data.get("solar_system_id")
+                    struct_type_id = data.get("type_id")
                     if name:
                         break
                 except Exception as exc:
@@ -724,6 +730,7 @@ async def resolve_locations(db: AsyncSession, character_id: int | None = None) -
                 name=name or f"Unknown Structure ({struct_id})",
                 location_type="structure",
                 solar_system_id=solar_system_id,
+                type_id=struct_type_id,
                 last_updated=datetime.utcnow(),
             ))
             count += 1
