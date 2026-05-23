@@ -109,8 +109,9 @@ async def manufacturing_page(
     region_id       = int(cfg.get("market_region_id", "10000002") or 10000002)
     hub_name        = MARKET_HUBS.get(str(region_id), f"Region {region_id}")
 
-    mfg_system_id   = int(cfg.get("manufacturing_system_id", "30000142") or 30000142)
-    facility_tax_pct_mfg = float(cfg.get("facility_tax_pct", "0.0") or 0.0)
+    mfg_system_id            = int(cfg.get("manufacturing_system_id", "30000142") or 30000142)
+    facility_tax_pct_mfg     = float(cfg.get("facility_tax_pct", "0.0") or 0.0)
+    structure_role_bonus_mfg = float(cfg.get("structure_role_bonus_pct", "0.0") or 0.0)
 
     mfg_ci = (await db.execute(
         select(IndustryCostIndex).where(
@@ -144,6 +145,7 @@ async def manufacturing_page(
                 sales_tax_pct=sales_tax_pct,
                 broker_fee_pct=broker_fee_pct,
                 system_cost_index=mfg_cost_index,
+                structure_role_bonus_pct=structure_role_bonus_mfg,
                 facility_tax_pct=facility_tax_pct_mfg,
             )
         except Exception:
@@ -248,9 +250,10 @@ async def detail_page(
     raw_materials: list = []
     selected_prod_name = ""
     error = ""
-    mfg_cost_index       = 0.0
-    reaction_cost_index  = 0.0
-    facility_tax_pct_cfg = 0.0
+    mfg_cost_index           = 0.0
+    reaction_cost_index      = 0.0
+    facility_tax_pct_cfg     = 0.0
+    structure_role_bonus_cfg = 0.0
 
     if blueprint_item_id:
         selected_bp = next((bp for bp in all_blueprints if bp.item_id == blueprint_item_id), None)
@@ -295,8 +298,9 @@ async def detail_page(
             sales_tax_pct   = float(cfg.get("sales_tax_pct", "2.0") or 2.0)
             broker_fee_pct  = float(cfg.get("broker_fee_pct", "3.0") or 3.0)
 
-            mfg_system_id   = int(cfg.get("manufacturing_system_id", "30000142") or 30000142)
-            facility_tax_pct_cfg = float(cfg.get("facility_tax_pct", "0.0") or 0.0)
+            mfg_system_id            = int(cfg.get("manufacturing_system_id", "30000142") or 30000142)
+            facility_tax_pct_cfg     = float(cfg.get("facility_tax_pct", "0.0") or 0.0)
+            structure_role_bonus_cfg = float(cfg.get("structure_role_bonus_pct", "0.0") or 0.0)
 
             # Look up system cost indexes (both manufacturing and reactions)
             mfg_ci = (await db.execute(
@@ -325,6 +329,7 @@ async def detail_page(
                     broker_fee_pct=broker_fee_pct,
                     manufacturing_cost_index=mfg_cost_index,
                     reaction_cost_index=reaction_cost_index,
+                    structure_role_bonus_pct=structure_role_bonus_cfg,
                     facility_tax_pct=facility_tax_pct_cfg,
                 )
                 stats = collect_stats(tree)
@@ -349,9 +354,10 @@ async def detail_page(
             "outbound_isk_m3": outbound_isk_m3 if blueprint_item_id else 0.0,
             "sales_tax_pct": sales_tax_pct if blueprint_item_id else 2.0,
             "broker_fee_pct": broker_fee_pct if blueprint_item_id else 3.0,
-            "mfg_cost_index":    mfg_cost_index if blueprint_item_id else 0.0,
-            "reaction_cost_index": reaction_cost_index if blueprint_item_id else 0.0,
-            "facility_tax_pct":  facility_tax_pct_cfg if blueprint_item_id else 0.0,
+            "mfg_cost_index":           mfg_cost_index if blueprint_item_id else 0.0,
+            "reaction_cost_index":      reaction_cost_index if blueprint_item_id else 0.0,
+            "structure_role_bonus_pct": structure_role_bonus_cfg if blueprint_item_id else 0.0,
+            "facility_tax_pct":         facility_tax_pct_cfg if blueprint_item_id else 0.0,
             "error": error,
         },
     )

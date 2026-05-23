@@ -129,6 +129,24 @@
       </div>
       <div class="form-row">
         <label class="form-label">
+          Structure role bonus (%)
+          <span class="form-hint">Reduction on the cost-index component only (NOT on SCC surcharge or facility tax). Presets: 0% NPC station, 15% Raitaru / Azbel, 20% Sotiyo.</span>
+        </label>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+          <input type="number" name="structure_role_bonus_pct"
+                 id="structure_role_bonus_pct"
+                 value="{{ settings.structure_role_bonus_pct }}"
+                 min="0" max="25" step="0.01" class="form-input" style="max-width:120px">
+          <button type="button" class="btn btn-sm"
+                  onclick="document.getElementById('structure_role_bonus_pct').value='0'">NPC (0%)</button>
+          <button type="button" class="btn btn-sm"
+                  onclick="document.getElementById('structure_role_bonus_pct').value='15'">Raitaru/Azbel (15%)</button>
+          <button type="button" class="btn btn-sm"
+                  onclick="document.getElementById('structure_role_bonus_pct').value='20'">Sotiyo (20%)</button>
+        </div>
+      </div>
+      <div class="form-row">
+        <label class="form-label">
           Facility tax (%)
           <span class="form-hint">Additional tax charged by the structure owner on top of the system cost index. Check the in-game installation screen — typically 0% (your own citadel), 0.25–3% (friendly corp), 5–15% (public).</span>
         </label>

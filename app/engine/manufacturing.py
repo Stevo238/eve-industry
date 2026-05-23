@@ -255,6 +255,7 @@ async def analyse_blueprint(
     sales_tax_pct: float = 2.0,
     broker_fee_pct: float = 3.0,
     system_cost_index: float = 0.0,
+    structure_role_bonus_pct: float = 0.0,
     facility_tax_pct: float = 0.0,
 ) -> "ManufacturingOption | None":
     # Clamp runs to BPC limit
@@ -408,12 +409,14 @@ async def analyse_blueprint(
     sales_tax = gross * (sales_tax_pct / 100.0)
     broker_fee = 0.0  # no order listing
 
-    # Industry job cost: cost_index * sum(adjusted_price * qty)
-    # We use a placeholder cost_index; a real implementation would look up the
-    # system's manufacturing index from IndustryCostIndex.  For now we use 0
-    # so the adjusted_price accumulation above stays as a raw material value
-    # (manufacturing fee is approximate).
-    rate = system_cost_index + facility_tax_pct / 100.0
+    # Industry job cost (full EVE formula):
+    #   Job Gross Cost = EIV × cost_index × (1 − structure_role_bonus)
+    #   SCC Surcharge  = EIV × 4%   (flat CCP tax, NOT reduced by role bonus)
+    #   Facility Tax   = EIV × facility_tax%
+    #   Total Job Cost = Job Gross Cost + SCC Surcharge + Facility Tax
+    SCC_SURCHARGE = 0.04
+    ci_after_bonus = system_cost_index * (1.0 - structure_role_bonus_pct / 100.0)
+    rate = ci_after_bonus + SCC_SURCHARGE + facility_tax_pct / 100.0
     manufacturing_fee = manufacturing_fee * rate
 
     return ManufacturingOption(
@@ -460,6 +463,7 @@ async def get_all_manufacturing_options(
     sales_tax_pct: float = 2.0,
     broker_fee_pct: float = 3.0,
     system_cost_index: float = 0.0,
+    structure_role_bonus_pct: float = 0.0,
     facility_tax_pct: float = 0.0,
 ) -> list[ManufacturingOption]:
     stmt = select(Blueprint)
@@ -480,6 +484,7 @@ async def get_all_manufacturing_options(
             sales_tax_pct=sales_tax_pct,
             broker_fee_pct=broker_fee_pct,
             system_cost_index=system_cost_index,
+            structure_role_bonus_pct=structure_role_bonus_pct,
             facility_tax_pct=facility_tax_pct,
         )
         if opt is None:

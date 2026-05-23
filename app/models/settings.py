@@ -22,6 +22,7 @@ SETTING_DEFAULTS: dict[str, str] = {
     "broker_fee_pct": "3.0",
     "manufacturing_system_id": "30000142",   # Jita
     "facility_tax_pct": "0.0",
+    "structure_role_bonus_pct": "0.0",     # 0=NPC, 15=Raitaru/Azbel, 20=Sotiyo
 }
 
 # Market hubs: region_id → display name

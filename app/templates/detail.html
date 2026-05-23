@@ -134,8 +134,12 @@
     <div class="fin-line">
       <span class="fin-line-label">Industry job fees
         <span class="fin-calc-bubble">
-          {% if mfg_cost_index > 0 %}{{ "{:.2f}".format(mfg_cost_index * 100) }}% idx{% endif %}
-          {% if facility_tax_pct > 0 %} + {{ "{:.2f}".format(facility_tax_pct) }}% facility{% endif %}
+          EIV ×
+          ({% if mfg_cost_index > 0 %}{{ "{:.2f}".format(mfg_cost_index * 100) }}% idx
+          {%- if structure_role_bonus_pct > 0 %} × {{ "{:.0f}".format(100 - structure_role_bonus_pct) }}%{% endif %}
+          {%- else %}0% idx{% endif %}
+          + 4% SCC
+          {%- if facility_tax_pct > 0 %} + {{ "{:.2f}".format(facility_tax_pct) }}% facility{% endif %})
         </span>
       </span>
       <span class="fin-amount text-muted">{{ isk(stats.total_job_cost) }} ISK</span>

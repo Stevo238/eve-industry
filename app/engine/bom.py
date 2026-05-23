@@ -27,6 +27,10 @@ SUPPORTED_ACTIVITIES = [ACTIVITY_MANUFACTURING, ACTIVITY_REACTIONS]
 ACTIVITY_LABEL = {ACTIVITY_MANUFACTURING: "Manufacturing", ACTIVITY_REACTIONS: "Reaction"}
 MAX_DEPTH = 12
 
+# CCP-fixed SCC (Secure Commerce Commission) surcharge on every industry job.
+# Applied to EIV at full rate — NOT reduced by structure role bonuses.
+SCC_SURCHARGE = 0.04  # 4 %
+
 
 @dataclass
 class BOMNode:
@@ -62,10 +66,12 @@ class BOMNode:
     broker_fee_pct: float = 0.0       # % broker fee when listing on market (e.g. 3.0)
 
     # Industry job cost — set once at tree build time, same value on every node
-    adjusted_price: float = 0.0             # CCP adjusted price for EIV calculation
-    manufacturing_cost_index: float = 0.0  # system manufacturing cost index (e.g. 0.05 = 5%)
-    reaction_cost_index: float = 0.0        # system reaction cost index
-    facility_tax_pct: float = 0.0           # structure owner's tax on top of cost index
+    adjusted_price: float = 0.0              # CCP adjusted price for EIV calculation
+    manufacturing_cost_index: float = 0.0   # system manufacturing cost index (e.g. 0.05 = 5%)
+    reaction_cost_index: float = 0.0         # system reaction cost index
+    structure_role_bonus_pct: float = 0.0   # structure discount on cost-index component only
+                                             #   0% = NPC station, 15% = Raitaru/Azbel, 20% = Sotiyo
+    facility_tax_pct: float = 0.0            # extra % set by structure owner (on top of everything)
 
     # ── Derived properties ───────────────────────────────────────────────────
 
@@ -201,17 +207,28 @@ class BOMNode:
     @property
     def job_cost(self) -> float:
         """
-        Industry job installation fee for THIS node's manufacturing/reaction job.
-        Formula: sum(adjusted_price × qty_needed for direct children) × (cost_index + facility_tax)
-        Only applies to nodes that represent a manufacturing or reaction job (has blueprint + children).
+        Industry job installation fee for THIS manufacturing/reaction job.
+
+        EVE formula (matches the in-game installation breakdown):
+          Job Gross Cost = EIV × cost_index × (1 − structure_role_bonus)
+          SCC Surcharge  = EIV × 4%   (flat CCP tax, NOT reduced by role bonus)
+          Facility Tax   = EIV × facility_tax%
+          ─────────────────────────────────────────────────────
+          Total Job Cost = Job Gross Cost + SCC Surcharge + Facility Tax
+
+        Only applies to nodes with a blueprint and children (actual jobs).
         """
         if not (self.children and self.has_blueprint):
             return 0.0
         eiv = sum(c.adjusted_price * c.quantity_needed for c in self.children)
         if self.activity_label == "Reaction":
-            rate = self.reaction_cost_index + self.facility_tax_pct / 100.0
+            ci = self.reaction_cost_index
         else:
-            rate = self.manufacturing_cost_index + self.facility_tax_pct / 100.0
+            ci = self.manufacturing_cost_index
+        # Cost-index portion reduced by structure role bonus (e.g. 15% for Raitaru)
+        ci_after_bonus = ci * (1.0 - self.structure_role_bonus_pct / 100.0)
+        # SCC surcharge is unavoidable — not reduced by role bonus
+        rate = ci_after_bonus + SCC_SURCHARGE + self.facility_tax_pct / 100.0
         return eiv * rate
 
     @property
@@ -407,6 +424,7 @@ async def build_bom_tree(
     broker_fee_pct: float = 0.0,
     manufacturing_cost_index: float = 0.0,
     reaction_cost_index: float = 0.0,
+    structure_role_bonus_pct: float = 0.0,
     facility_tax_pct: float = 0.0,
     depth: int = 0,
 ) -> BOMNode:
@@ -436,6 +454,7 @@ async def build_bom_tree(
         adjusted_price=p.get("adjusted", 0.0),
         manufacturing_cost_index=manufacturing_cost_index,
         reaction_cost_index=reaction_cost_index,
+        structure_role_bonus_pct=structure_role_bonus_pct,
         facility_tax_pct=facility_tax_pct,
     )
 
@@ -514,6 +533,7 @@ async def build_bom_tree(
             broker_fee_pct=broker_fee_pct,
             manufacturing_cost_index=manufacturing_cost_index,
             reaction_cost_index=reaction_cost_index,
+            structure_role_bonus_pct=structure_role_bonus_pct,
             facility_tax_pct=facility_tax_pct,
             depth=depth + 1,
         )
