@@ -61,6 +61,12 @@ class BOMNode:
     sales_tax_pct: float = 0.0        # % transaction tax when selling (e.g. 2.0)
     broker_fee_pct: float = 0.0       # % broker fee when listing on market (e.g. 3.0)
 
+    # Industry job cost — set once at tree build time, same value on every node
+    adjusted_price: float = 0.0             # CCP adjusted price for EIV calculation
+    manufacturing_cost_index: float = 0.0  # system manufacturing cost index (e.g. 0.05 = 5%)
+    reaction_cost_index: float = 0.0        # system reaction cost index
+    facility_tax_pct: float = 0.0           # structure owner's tax on top of cost index
+
     # ── Derived properties ───────────────────────────────────────────────────
 
     @property
@@ -193,6 +199,27 @@ class BOMNode:
         return (self.net_sell_value - self.outbound_shipping_cost) - self.make_cost
 
     @property
+    def job_cost(self) -> float:
+        """
+        Industry job installation fee for THIS node's manufacturing/reaction job.
+        Formula: sum(adjusted_price × qty_needed for direct children) × (cost_index + facility_tax)
+        Only applies to nodes that represent a manufacturing or reaction job (has blueprint + children).
+        """
+        if not (self.children and self.has_blueprint):
+            return 0.0
+        eiv = sum(c.adjusted_price * c.quantity_needed for c in self.children)
+        if self.activity_label == "Reaction":
+            rate = self.reaction_cost_index + self.facility_tax_pct / 100.0
+        else:
+            rate = self.manufacturing_cost_index + self.facility_tax_pct / 100.0
+        return eiv * rate
+
+    @property
+    def total_job_cost(self) -> float:
+        """Recursive sum of job fees for this node and all manufactured descendants."""
+        return self.job_cost + sum(c.total_job_cost for c in self.children)
+
+    @property
     def total_volume_needed(self) -> float:
         return self.volume_each * self.quantity_needed
 
@@ -215,6 +242,7 @@ class BOMStats:
     missing_material_count: int = 0      # nodes with shortage > 0
     exit_point_count: int = 0
     total_job_time: int = 0              # sum of all job times (seconds)
+    total_job_cost: float = 0.0           # sum of all industry job installation fees
 
 
 def collect_stats(root: BOMNode) -> BOMStats:
@@ -227,6 +255,7 @@ def collect_stats(root: BOMNode) -> BOMStats:
     stats.total_material_cost = root.make_cost - root.total_inbound_shipping
     stats.revenue = root.total_sell_value
     stats.net_profit = root.total_sell_value - root.make_cost - root.outbound_shipping_cost
+    stats.total_job_cost = root.total_job_cost
 
     def walk(node: BOMNode, is_root: bool = False) -> None:
         if node.job_time_seconds:
@@ -376,6 +405,9 @@ async def build_bom_tree(
     outbound_isk_per_m3: float = 0.0,
     sales_tax_pct: float = 0.0,
     broker_fee_pct: float = 0.0,
+    manufacturing_cost_index: float = 0.0,
+    reaction_cost_index: float = 0.0,
+    facility_tax_pct: float = 0.0,
     depth: int = 0,
 ) -> BOMNode:
     """Recursively build the BOM tree for the given item and quantity."""
@@ -401,6 +433,10 @@ async def build_bom_tree(
         outbound_isk_per_m3=outbound_isk_per_m3,
         sales_tax_pct=sales_tax_pct,
         broker_fee_pct=broker_fee_pct,
+        adjusted_price=p.get("adjusted", 0.0),
+        manufacturing_cost_index=manufacturing_cost_index,
+        reaction_cost_index=reaction_cost_index,
+        facility_tax_pct=facility_tax_pct,
     )
 
     if depth >= MAX_DEPTH or type_id in visited:
@@ -476,6 +512,9 @@ async def build_bom_tree(
             outbound_isk_per_m3=outbound_isk_per_m3,
             sales_tax_pct=sales_tax_pct,
             broker_fee_pct=broker_fee_pct,
+            manufacturing_cost_index=manufacturing_cost_index,
+            reaction_cost_index=reaction_cost_index,
+            facility_tax_pct=facility_tax_pct,
             depth=depth + 1,
         )
         node.children.append(child)

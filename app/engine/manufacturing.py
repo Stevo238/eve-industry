@@ -212,7 +212,7 @@ def calc_time_seconds(
     blueprint_te: int,
     structure_time_bonus: float = 0.0,
 ) -> int:
-    te_reduction = blueprint_te / 100.0 * 0.2 + structure_time_bonus
+    te_reduction = blueprint_te / 100.0 + structure_time_bonus
     time_per_run = max(1, math.ceil(base_time * (1.0 - te_reduction)))
     return time_per_run * runs
 
@@ -254,6 +254,8 @@ async def analyse_blueprint(
     outbound_isk_per_m3: float = 0.0,
     sales_tax_pct: float = 2.0,
     broker_fee_pct: float = 3.0,
+    system_cost_index: float = 0.0,
+    facility_tax_pct: float = 0.0,
 ) -> "ManufacturingOption | None":
     # Clamp runs to BPC limit
     if not blueprint.is_original and runs > blueprint.runs:
@@ -411,7 +413,8 @@ async def analyse_blueprint(
     # system's manufacturing index from IndustryCostIndex.  For now we use 0
     # so the adjusted_price accumulation above stays as a raw material value
     # (manufacturing fee is approximate).
-    manufacturing_fee = manufacturing_fee * 0.05  # approx 5% of material adjusted value
+    rate = system_cost_index + facility_tax_pct / 100.0
+    manufacturing_fee = manufacturing_fee * rate
 
     return ManufacturingOption(
         blueprint_item_id=blueprint.item_id,
@@ -456,6 +459,8 @@ async def get_all_manufacturing_options(
     outbound_isk_per_m3: float = 0.0,
     sales_tax_pct: float = 2.0,
     broker_fee_pct: float = 3.0,
+    system_cost_index: float = 0.0,
+    facility_tax_pct: float = 0.0,
 ) -> list[ManufacturingOption]:
     stmt = select(Blueprint)
     if character_ids:
@@ -474,6 +479,8 @@ async def get_all_manufacturing_options(
             outbound_isk_per_m3=outbound_isk_per_m3,
             sales_tax_pct=sales_tax_pct,
             broker_fee_pct=broker_fee_pct,
+            system_cost_index=system_cost_index,
+            facility_tax_pct=facility_tax_pct,
         )
         if opt is None:
             continue

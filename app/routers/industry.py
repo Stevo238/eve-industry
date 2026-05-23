@@ -12,7 +12,7 @@ from app.engine.manufacturing import get_all_manufacturing_options, get_asset_in
 from app.esi.sync import sync_blueprint_market_prices
 from app.models.blueprints import Blueprint
 from app.models.character import Character
-from app.models.industry import IndustryJob
+from app.models.industry import IndustryCostIndex, IndustryJob
 from app.models.market import MarketPrice
 from app.models.settings import MARKET_HUBS
 from app.models.sde import SdeBlueprintProduct, SdeType
@@ -109,6 +109,17 @@ async def manufacturing_page(
     region_id       = int(cfg.get("market_region_id", "10000002") or 10000002)
     hub_name        = MARKET_HUBS.get(str(region_id), f"Region {region_id}")
 
+    mfg_system_id   = int(cfg.get("manufacturing_system_id", "30000142") or 30000142)
+    facility_tax_pct_mfg = float(cfg.get("facility_tax_pct", "0.0") or 0.0)
+
+    mfg_ci = (await db.execute(
+        select(IndustryCostIndex).where(
+            IndustryCostIndex.solar_system_id == mfg_system_id,
+            IndustryCostIndex.activity == "manufacturing",
+        )
+    )).scalar_one_or_none()
+    mfg_cost_index = mfg_ci.cost_index if mfg_ci else 0.0
+
     price_row = (
         await db.execute(
             select(MarketPrice).where(MarketPrice.buy_price.isnot(None)).limit(1)
@@ -132,6 +143,8 @@ async def manufacturing_page(
                 outbound_isk_per_m3=outbound_isk_m3,
                 sales_tax_pct=sales_tax_pct,
                 broker_fee_pct=broker_fee_pct,
+                system_cost_index=mfg_cost_index,
+                facility_tax_pct=facility_tax_pct_mfg,
             )
         except Exception:
             import traceback
@@ -235,6 +248,9 @@ async def detail_page(
     raw_materials: list = []
     selected_prod_name = ""
     error = ""
+    mfg_cost_index       = 0.0
+    reaction_cost_index  = 0.0
+    facility_tax_pct_cfg = 0.0
 
     if blueprint_item_id:
         selected_bp = next((bp for bp in all_blueprints if bp.item_id == blueprint_item_id), None)
@@ -261,12 +277,14 @@ async def detail_page(
             inventory = await get_asset_inventory(db)
 
             price_rows = (await db.execute(
-                select(MarketPrice.type_id, MarketPrice.buy_price, MarketPrice.sell_price)
+                select(MarketPrice.type_id, MarketPrice.buy_price, MarketPrice.sell_price,
+                       MarketPrice.adjusted_price)
             )).fetchall()
             prices: dict[int, dict] = {
                 row.type_id: {
-                    "buy": float(row.buy_price or 0.0),
-                    "sell": float(row.sell_price or 0.0),
+                    "buy":      float(row.buy_price or 0.0),
+                    "sell":     float(row.sell_price or 0.0),
+                    "adjusted": float(row.adjusted_price or 0.0),
                 }
                 for row in price_rows
             }
@@ -277,6 +295,25 @@ async def detail_page(
             sales_tax_pct   = float(cfg.get("sales_tax_pct", "2.0") or 2.0)
             broker_fee_pct  = float(cfg.get("broker_fee_pct", "3.0") or 3.0)
 
+            mfg_system_id   = int(cfg.get("manufacturing_system_id", "30000142") or 30000142)
+            facility_tax_pct_cfg = float(cfg.get("facility_tax_pct", "0.0") or 0.0)
+
+            # Look up system cost indexes (both manufacturing and reactions)
+            mfg_ci = (await db.execute(
+                select(IndustryCostIndex).where(
+                    IndustryCostIndex.solar_system_id == mfg_system_id,
+                    IndustryCostIndex.activity == "manufacturing",
+                )
+            )).scalar_one_or_none()
+            reaction_ci = (await db.execute(
+                select(IndustryCostIndex).where(
+                    IndustryCostIndex.solar_system_id == mfg_system_id,
+                    IndustryCostIndex.activity == "reaction",
+                )
+            )).scalar_one_or_none()
+            mfg_cost_index      = mfg_ci.cost_index if mfg_ci else 0.0
+            reaction_cost_index = reaction_ci.cost_index if reaction_ci else 0.0
+
             try:
                 tree = await build_bom_tree(
                     db, product_type_id, total_qty,
@@ -286,6 +323,9 @@ async def detail_page(
                     outbound_isk_per_m3=outbound_isk_m3,
                     sales_tax_pct=sales_tax_pct,
                     broker_fee_pct=broker_fee_pct,
+                    manufacturing_cost_index=mfg_cost_index,
+                    reaction_cost_index=reaction_cost_index,
+                    facility_tax_pct=facility_tax_pct_cfg,
                 )
                 stats = collect_stats(tree)
                 raw_materials = collect_raw_materials(tree, inbound_isk_per_m3=inbound_isk_m3)
@@ -309,6 +349,9 @@ async def detail_page(
             "outbound_isk_m3": outbound_isk_m3 if blueprint_item_id else 0.0,
             "sales_tax_pct": sales_tax_pct if blueprint_item_id else 2.0,
             "broker_fee_pct": broker_fee_pct if blueprint_item_id else 3.0,
+            "mfg_cost_index":    mfg_cost_index if blueprint_item_id else 0.0,
+            "reaction_cost_index": reaction_cost_index if blueprint_item_id else 0.0,
+            "facility_tax_pct":  facility_tax_pct_cfg if blueprint_item_id else 0.0,
             "error": error,
         },
     )

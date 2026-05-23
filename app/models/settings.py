@@ -15,11 +15,13 @@ class UserSetting(Base):
 
 # Default values used when a key is not present in the DB
 SETTING_DEFAULTS: dict[str, str] = {
-    "market_region_id": "10000002",   # The Forge (Jita)
+    "market_region_id": "10000002",
     "inbound_shipping_isk_per_m3": "0",
     "outbound_shipping_isk_per_m3": "0",
     "sales_tax_pct": "2.0",
     "broker_fee_pct": "3.0",
+    "manufacturing_system_id": "30000142",   # Jita
+    "facility_tax_pct": "0.0",
 }
 
 # Market hubs: region_id → display name

@@ -4,7 +4,7 @@
 <div class="page-header">
   <div>
     <div class="page-title">Settings</div>
-    <div class="page-sub">Market hub, shipping costs, and tax configuration</div>
+    <div class="page-sub">Market hub, shipping costs, tax &amp; industry facility configuration</div>
   </div>
 </div>
 
@@ -74,6 +74,42 @@
         <input type="number" name="sales_tax_pct"
                value="{{ settings.sales_tax_pct }}"
                min="0" max="20" step="0.1" class="form-input">
+      </div>
+      <div class="form-row">
+        <label class="form-label">
+          Broker fee (%)
+          <span class="form-hint">Applies when placing sell orders. Typical: 3.0% (base), lower with skills/standings. Set 0 if you only sell to buy orders.</span>
+        </label>
+        <input type="number" name="broker_fee_pct"
+               value="{{ settings.broker_fee_pct }}"
+               min="0" max="10" step="0.1" class="form-input">
+      </div>
+    </div>
+
+    <h3 class="settings-heading" style="margin-top:24px">Industry Facility</h3>
+    <p class="settings-hint">
+      The system where you install manufacturing and reaction jobs. Used to look up
+      the <strong>system cost index</strong> — the main variable component of job installation fees.
+      Sync your characters to populate cost index data.
+    </p>
+    <div style="display:grid; gap:16px">
+      <div class="form-row">
+        <label class="form-label">
+          Manufacturing system ID
+          <span class="form-hint">Solar system ID where you install jobs. Common: Jita = 30000142, Amarr = 30002187, Dodixie = 30002659. Find yours via <a href="https://evemaps.dotlan.net" target="_blank" style="color:var(--accent)">dotlan.net</a> or zkillboard.</span>
+        </label>
+        <input type="number" name="manufacturing_system_id"
+               value="{{ settings.manufacturing_system_id }}"
+               min="1" class="form-input">
+      </div>
+      <div class="form-row">
+        <label class="form-label">
+          Facility tax (%)
+          <span class="form-hint">Additional tax charged by the structure owner on top of the system cost index. Check the in-game installation screen — typically 0% (your own citadel), 0.25–3% (friendly corp), 5–15% (public).</span>
+        </label>
+        <input type="number" name="facility_tax_pct"
+               value="{{ settings.facility_tax_pct }}"
+               min="0" max="25" step="0.01" class="form-input">
       </div>
     </div>
 

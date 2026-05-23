@@ -101,7 +101,7 @@
     {% set owned_net_raw   = owned_gross - owned_ship_out - owned_tax_cost %}
     {% set owned_net       = owned_net_raw if owned_net_raw > 0 else 0 %}
     {# True COGS uses the adjusted opportunity cost #}
-    {% set true_cogs       = owned_net + buy_total + stats.total_inbound_shipping %}
+    {% set true_cogs       = owned_net + buy_total + stats.total_inbound_shipping + stats.total_job_cost %}
 
     {% if owned_gross > 0 %}
     <div class="fin-line">
@@ -128,6 +128,17 @@
     <div class="fin-line">
       <span class="fin-line-label">Inbound shipping</span>
       <span class="fin-amount text-muted">{{ isk(stats.total_inbound_shipping) }} ISK</span>
+    </div>
+    {% endif %}
+    {% if stats.total_job_cost > 0 %}
+    <div class="fin-line">
+      <span class="fin-line-label">Industry job fees
+        <span class="fin-calc-bubble">
+          {% if mfg_cost_index > 0 %}{{ "{:.2f}".format(mfg_cost_index * 100) }}% idx{% endif %}
+          {% if facility_tax_pct > 0 %} + {{ "{:.2f}".format(facility_tax_pct) }}% facility{% endif %}
+        </span>
+      </span>
+      <span class="fin-amount text-muted">{{ isk(stats.total_job_cost) }} ISK</span>
     </div>
     {% endif %}
     <div class="fin-rule"></div>
@@ -238,7 +249,7 @@
             <th class="td-right">Have</th>
             <th class="td-right">Short</th>
             <th class="td-right">True Cost</th>
-            <th class="td-right" style="font-size:10px; color:var(--text-muted)" title="Owned qty × buy order price (opportunity cost)">↳ Owned</th>
+            <th class="td-right" style="font-size:10px; color:var(--text-muted)" title="Net opportunity cost: owned qty × buy price, minus outbound shipping and sales tax — matches the 'Have' line in the P&L above">↳ Net Opp. Cost</th>
             <th class="td-right" style="font-size:10px; color:var(--error)" title="Missing qty × sell order price (acquisition cost)">↳ To Buy</th>
             {% if inbound_isk_m3 > 0 %}
             <th class="td-right" style="color:var(--warning)" title="Shipping cost on shortage volume only">Ship IN</th>
@@ -263,7 +274,16 @@
               {% if m.total_cost > 0 %}{{ isk(m.total_cost) }}{% else %}<span class="text-muted">—</span>{% endif %}
             </td>
             <td class="td-right text-muted isk" style="font-size:12px">
-              {% if m.cost_owned > 0 %}{{ isk(m.cost_owned) }}{% else %}<span style="color:var(--border)">—</span>{% endif %}
+              {% if m.cost_owned > 0 %}
+                {% set mat_ship    = m.owned_volume * outbound_isk_m3 %}
+                {% set mat_tax     = m.cost_owned * sales_tax_pct / 100 %}
+                {% set mat_net_raw = m.cost_owned - mat_ship - mat_tax %}
+                {% set mat_net     = mat_net_raw if mat_net_raw > 0 else 0 %}
+                <span title="Gross {{ isk(m.cost_owned) }}{% if mat_ship > 0 %} − {{ isk(mat_ship) }} ship{% endif %}{% if mat_tax > 0 %} − {{ isk(mat_tax) }} tax{% endif %} = {{ isk(mat_net) }} net">{{ isk(mat_net) }}</span>
+                {% if mat_ship > 0 or mat_tax > 0 %}
+                <div style="font-size:9px; color:var(--text-muted); opacity:0.6; white-space:nowrap; margin-top:1px">was {{ isk(m.cost_owned) }}</div>
+                {% endif %}
+              {% else %}<span style="color:var(--border)">—</span>{% endif %}
             </td>
             <td class="td-right {% if m.shortage_cost > 0 %}text-error isk{% else %}text-success{% endif %}">
               {% if m.shortage_cost > 0 %}{{ isk(m.shortage_cost) }}{% else %}✓ Have{% endif %}
@@ -289,7 +309,7 @@
               {{ isk(raw_materials | sum(attribute='total_cost')) }}
             </td>
             <td class="td-right text-muted isk" style="font-weight:700; padding:8px 12px; font-size:12px">
-              {{ isk(raw_materials | sum(attribute='cost_owned')) }}
+              <span title="Gross {{ isk(raw_materials | sum(attribute='cost_owned')) }} − shipping − tax = {{ isk(owned_net) }} net">{{ isk(owned_net) }}</span>
             </td>
             <td class="td-right text-error isk" style="font-weight:700; padding:8px 12px">
               {% set shortage_total = raw_materials | sum(attribute='shortage_cost') %}
@@ -377,14 +397,20 @@
       </div>
       {% endif %}
       <div class="bom-stat-item">
-        <span class="bom-stat-label">Est. Profit</span>
-        {% set profit = node.total_sell_value - node.make_cost - node.outbound_shipping_cost %}
-        {% if profit >= 0 %}
-          <span class="bom-stat-val text-success">+{{ isk(profit) }}</span>
+        <span class="bom-stat-label">Net Profit</span>
+        {% if net_profit >= 0 %}
+          <span class="bom-stat-val text-success">+{{ isk(net_profit) }}</span>
         {% else %}
-          <span class="bom-stat-val text-error">{{ isk(profit) }}</span>
+          <span class="bom-stat-val text-error">{{ isk(net_profit) }}</span>
         {% endif %}
-        <span class="bom-stat-sub">after shipping, before tax</span>
+        <span class="bom-stat-sub">after all fees &amp; shipping</span>
+      </div>
+      {% endif %}
+      {% if stats.total_job_cost > 0 %}
+      <div class="bom-stat-item">
+        <span class="bom-stat-label">Job Fees</span>
+        <span class="bom-stat-val isk" style="color:var(--text-muted)">{{ isk(stats.total_job_cost) }}</span>
+        <span class="bom-stat-sub">all jobs combined</span>
       </div>
       {% endif %}
       <div class="bom-stat-item">
@@ -452,6 +478,12 @@
         <span class="bom-cost-label">Make cost</span>
         <span class="bom-cost-val isk">{{ isk(node.make_cost) }}</span>
       </div>
+      {% if node.job_cost > 0 %}
+      <div class="bom-cost-row">
+        <span class="bom-cost-label">Job fee</span>
+        <span class="bom-cost-val isk text-muted">{{ isk(node.job_cost) }}</span>
+      </div>
+      {% endif %}
       {% if node.sell_price > 0 %}
       <div class="bom-cost-row" title="Worst-case cost if you bought all {{ '{:,}'.format(node.quantity_needed) }} units at market sell price">
         <span class="bom-cost-label text-muted">Buy from market</span>
@@ -477,10 +509,23 @@
         <span class="bom-cost-val isk">{{ isk(node.true_material_cost) }}</span>
       </div>
       {% if node.quantity_available > 0 and node.cost_owned > 0 %}
-      <div class="bom-cost-row" title="Opportunity cost: valued at what you'd get selling {{ '{:,}'.format([node.quantity_needed, node.quantity_available] | min) }} units to buy orders">
+      <div class="bom-cost-row" title="Gross opportunity cost: {{ '{:,}'.format([node.quantity_needed, node.quantity_available] | min) }} × {{ '{:,.2f}'.format(node.buy_price) }} buy price">
         <span class="bom-cost-label text-muted" style="padding-left:8px">↳ owned ×{{ qty([node.quantity_needed, node.quantity_available] | min) }}</span>
         <span class="bom-cost-val text-muted isk">{{ isk(node.cost_owned) }}</span>
       </div>
+      {% set _n_ship = ([node.quantity_needed, node.quantity_available] | min) * node.volume_each * outbound_isk_m3 %}
+      {% set _n_tax  = node.cost_owned * sales_tax_pct / 100 %}
+      {% set _n_net  = node.cost_owned - _n_ship - _n_tax %}
+      {% set _n_net  = _n_net if _n_net > 0 else 0 %}
+      {% if _n_ship > 0 or _n_tax > 0 %}
+      <div class="bom-cost-row">
+        <span class="bom-cost-label text-muted" style="padding-left:16px; font-size:10px">↳ net opp. cost</span>
+        <span class="bom-cost-val text-muted isk" style="font-size:11px">{{ isk(_n_net) }}</span>
+      </div>
+      <div style="padding:1px 12px 0 28px; font-size:9px; color:var(--text-muted); opacity:0.6; line-height:1.4">
+        {{ isk(node.cost_owned) }}{% if _n_ship > 0 %} − {{ isk(_n_ship) }} ship{% endif %}{% if _n_tax > 0 %} − {{ isk(_n_tax) }} tax{% endif %}
+      </div>
+      {% endif %}
       {% endif %}
       {% if node.shortage > 0 %}
       <div class="bom-cost-row" title="Acquisition cost: buy {{ '{:,}'.format(node.shortage) }} units at market sell order price">
