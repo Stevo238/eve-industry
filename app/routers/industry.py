@@ -88,27 +88,18 @@ async def jobs_page(
     )
 
 
-@router.get("/manufacturing", response_class=HTMLResponse)
-async def manufacturing_page(
-    request: Request,
-    runs: int = 1,
-    buildable_only: bool = False,
-    structure_me: float = 0.0,
-    activity_filter: str = "all",   # "all" | "manufacturing" | "reactions"
-    db: AsyncSession = Depends(get_db),
-):
+async def _manufacturing_shell_context(request: Request, db: AsyncSession) -> dict:
+    """Shared fast context used by both the shell page and the results partial."""
     chars_result = await db.execute(select(Character).order_by(Character.name))
     characters = chars_result.scalars().all()
-    character_ids = [c.character_id for c in characters]
 
-    # All config comes from Settings — no per-page overrides for shipping/hub
     cfg = await get_settings(db)
+    region_id = int(cfg.get("market_region_id", "10000002") or 10000002)
+    hub_name  = MARKET_HUBS.get(str(region_id), f"Region {region_id}")
     inbound_isk_m3  = float(cfg.get("inbound_shipping_isk_per_m3", "0") or 0)
     outbound_isk_m3 = float(cfg.get("outbound_shipping_isk_per_m3", "0") or 0)
     sales_tax_pct   = float(cfg.get("sales_tax_pct", "2.0") or 2.0)
     broker_fee_pct  = float(cfg.get("broker_fee_pct", "3.0") or 3.0)
-    region_id       = int(cfg.get("market_region_id", "10000002") or 10000002)
-    hub_name        = MARKET_HUBS.get(str(region_id), f"Region {region_id}")
 
     mfg_system_id            = int(cfg.get("manufacturing_system_id", "30000142") or 30000142)
     facility_tax_pct_mfg     = float(cfg.get("facility_tax_pct", "0.0") or 0.0)
@@ -127,7 +118,56 @@ async def manufacturing_page(
             select(MarketPrice).where(MarketPrice.buy_price.isnot(None)).limit(1)
         )
     ).scalar_one_or_none()
-    has_order_prices = price_row is not None
+
+    return {
+        "request": request,
+        "characters": characters,
+        "character_ids": [c.character_id for c in characters],
+        "cfg": cfg,
+        "hub_name": hub_name,
+        "inbound_isk_m3": inbound_isk_m3,
+        "outbound_isk_m3": outbound_isk_m3,
+        "sales_tax_pct": sales_tax_pct,
+        "broker_fee_pct": broker_fee_pct,
+        "mfg_cost_index": mfg_cost_index,
+        "facility_tax_pct_mfg": facility_tax_pct_mfg,
+        "structure_role_bonus_mfg": structure_role_bonus_mfg,
+        "has_order_prices": price_row is not None,
+    }
+
+
+@router.get("/manufacturing", response_class=HTMLResponse)
+async def manufacturing_page(
+    request: Request,
+    runs: int = 1,
+    buildable_only: bool = False,
+    structure_me: float = 0.0,
+    activity_filter: str = "all",
+    db: AsyncSession = Depends(get_db),
+):
+    """Fast shell — renders the page and filter form with no analysis."""
+    ctx = await _manufacturing_shell_context(request, db)
+    return templates.TemplateResponse("manufacturing.html", {
+        **ctx,
+        "runs": runs,
+        "buildable_only": buildable_only,
+        "structure_me": structure_me,
+        "activity_filter": activity_filter,
+    })
+
+
+@router.get("/manufacturing/results", response_class=HTMLResponse)
+async def manufacturing_results(
+    request: Request,
+    runs: int = 1,
+    buildable_only: bool = False,
+    structure_me: float = 0.0,
+    activity_filter: str = "all",
+    db: AsyncSession = Depends(get_db),
+):
+    """HTMX partial — runs the slow analysis and returns just the results table."""
+    ctx = await _manufacturing_shell_context(request, db)
+    character_ids = ctx["character_ids"]
 
     options = []
     sde_available = True
@@ -141,41 +181,31 @@ async def manufacturing_page(
                 structure_me_bonus=structure_me / 100.0,
                 buildable_only=buildable_only,
                 activity_filter=activity_filter,
-                inbound_isk_per_m3=inbound_isk_m3,
-                outbound_isk_per_m3=outbound_isk_m3,
-                sales_tax_pct=sales_tax_pct,
-                broker_fee_pct=broker_fee_pct,
-                system_cost_index=mfg_cost_index,
-                structure_role_bonus_pct=structure_role_bonus_mfg,
-                facility_tax_pct=facility_tax_pct_mfg,
+                inbound_isk_per_m3=ctx["inbound_isk_m3"],
+                outbound_isk_per_m3=ctx["outbound_isk_m3"],
+                sales_tax_pct=ctx["sales_tax_pct"],
+                broker_fee_pct=ctx["broker_fee_pct"],
+                system_cost_index=ctx["mfg_cost_index"],
+                structure_role_bonus_pct=ctx["structure_role_bonus_mfg"],
+                facility_tax_pct=ctx["facility_tax_pct_mfg"],
             )
         except Exception:
             import traceback
             sde_available = False
             sde_error = traceback.format_exc()
 
-    return templates.TemplateResponse(
-        "manufacturing.html",
-        {
-            "request": request,
-            "characters": characters,
-            "options": options,
-            "runs": runs,
-            "buildable_only": buildable_only,
-            "structure_me": structure_me,
-            "activity_filter": activity_filter,
-            "sde_available": sde_available,
-            "sde_error": sde_error,
-            "total": len(options),
-            "buildable_count": sum(1 for o in options if o.can_build_now),
-            "has_order_prices": has_order_prices,
-            "price_sync_status": _price_sync_status,
-            "hub_name": hub_name,
-            "inbound_isk_m3": inbound_isk_m3,
-            "outbound_isk_m3": outbound_isk_m3,
-            "sales_tax_pct": sales_tax_pct,
-        },
-    )
+    return templates.TemplateResponse("manufacturing_results.html", {
+        **ctx,
+        "options": options,
+        "runs": runs,
+        "buildable_only": buildable_only,
+        "structure_me": structure_me,
+        "activity_filter": activity_filter,
+        "sde_available": sde_available,
+        "sde_error": sde_error,
+        "total": len(options),
+        "buildable_count": sum(1 for o in options if o.can_build_now),
+    })
 
 
 @router.post("/fetch-prices", response_class=HTMLResponse)
